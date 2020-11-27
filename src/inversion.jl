@@ -242,7 +242,7 @@ function correctcycleskipping(Δτc, Δτr, Δτl, ccc, ccr, ccl, X, A, Ap)
           cs[i] = j
           J = Jp
           c = true
-          @printf("\r%4d %4d %7.5f\n", p, i, 1e3J/(n+m-2))
+          @printf("\r%4d %4d %d %7.5f\n", p, i, j, 1e3J/(n+m-2))
         else
           b[i,:] = Δτa[i,:,cs[i]]
         end

@@ -1,4 +1,4 @@
-using SOT, CSV, DataFrames, PyPlot
+using .SOT, CSV, DataFrames, PyPlot, Printf, Dates
 
 # identifier for experiment
 eqname = "nias"
@@ -44,11 +44,29 @@ end
 t, τ, τerr = SOT.invert(eqname, pstations, tstation, invfreq, mincc; maxΔτ=maxΔτ,
                         excludetimes=excludetimes)
 
-# simple plot
+# plot timeseries
 colors = matplotlib.rcParams["axes.prop_cycle"].by_key()["color"]
-figure()
+fig, ax = subplots(2, 1, figsize=(16, 6.4), sharex=true)
 for i = 1:length(invfreq)
-  plot(t, τ[:,i], color=colors[i])
-  scatter(t, τ[:,i], s=5, c=colors[i])
-  fill_between(t, τ[:,i] - 2τerr[:,i], τ[:,i] + 2τerr[:,i], alpha=.25, color=colors[i], linewidths=0)
+  ax[1].plot(t, τ[:,i], color=colors[i], label=@sprintf("%3.1f Hz", invfreq[i]))
+  ax[1].scatter(t, τ[:,i], s=5, c=colors[i])
+  ax[1].fill_between(t, τ[:,i] - 2τerr[:,i], τ[:,i] + 2τerr[:,i], alpha=.25,
+                     color=colors[i], linewidths=0)
+  if i > 1
+    δτ = τ[:,i] - τ[:,1]
+    δτerr = sqrt.(τerr[:,1].^2 + τerr[:,i].^2)
+    ax[2].plot(t, δτ, color=colors[i], label=@sprintf("%3.1f Hz – %3.1f Hz", invfreq[i],
+                                                      invfreq[1]))
+    ax[2].scatter(t, δτ, s=5, color=colors[i])
+    ax[2].fill_between(t, δτ - 2δτerr, δτ + 2δτerr, alpha=.25, color=colors[i],
+                       linewidths=0)
+  end
 end
+ax[1].legend(frameon=false)
+ax[2].legend(frameon=false)
+ax[1].axhline(0, color="black", linewidth=.8, zorder=0)
+ax[2].axhline(0, color="black", linewidth=.8, zorder=0)
+ax[1].set_xlim(t[1] - (t[end] - t[1])/100, t[end] + (t[end] - t[1])/100)
+ax[1].set_ylabel("travel time anomaly (s)")
+ax[2].set_ylabel("travel time difference (s)")
+fig.tight_layout()
