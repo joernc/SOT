@@ -1,6 +1,3 @@
-# TODO:
-# - Print info on inversion
-
 # reference time
 global const tref = DateTime(2000, 1, 1, 0, 0, 0)
 
@@ -8,7 +5,7 @@ global const tref = DateTime(2000, 1, 1, 0, 0, 0)
 global const meanyear = 365.2425
 
 """
-    invert(eqname, pstations, tstation, invfreq, mincc; maxΔτ=Inf)
+    invert(eqname, pstations, tstation, invfreq, mincc; maxΔτ=Inf, excludetimes=[], timscale=NaN)
 
 Invert measurements of the travel time changes between events ``Δτ`` for travel time
 anomalies ``τ`` relative to an arbitrary but common reference.
@@ -21,6 +18,8 @@ anomalies ``τ`` relative to an arbitrary but common reference.
 - `mincc::Array{Float64,1}`: minimum CC requirement at the difference `invfreq`.
 - `maxΔτ::Float64=Inf`: maximum allowable ``Δτ``; larger measurements are discarded.
 - `excludetimes::Array{Array{Date,2},1}`: time periods to exclude from inversion.
+- `timescale::Float64=NaN`: time scale at which to apply smoothing; default is to use time
+  scale set by the sampling rather than a fixed scale.
 
 # Examples
 ```
@@ -31,7 +30,8 @@ julia> t, τ, τerr = SOT.invert("nias", catalog, ["PSI"], "H08S2..EDH", [2, 4],
 [...]
 ```
 """
-function invert(eqname, pstations, tstation, invfreq, mincc; maxΔτ=Inf, excludetimes=[])
+function invert(eqname, pstations, tstation, invfreq, mincc; maxΔτ=Inf, excludetimes=[],
+               timescale=NaN)
 
   # number of frequencies at which to perform inversion
   l = length(invfreq)
@@ -67,8 +67,8 @@ function invert(eqname, pstations, tstation, invfreq, mincc; maxΔτ=Inf, exclud
     @showprogress for (i, pair) in enumerate(eachrow(catalog))
 
       # file with T-wave data
-      filename = @sprintf("twavedelays/%s_%s_%s/%s_%s.h5", eqname, s, tstation, pair.event1,
-                          pair.event2)
+      filename = @sprintf("twavedelays/%s_%s_%s/%s_%s.h5", eqname, s, tstation,
+                          pair.event1, pair.event2)
 
       # read data if present
       if isfile(filename)
@@ -106,14 +106,17 @@ function invert(eqname, pstations, tstation, invfreq, mincc; maxΔτ=Inf, exclud
   n = sum(idx)
 
   # perform inversion
-  t, X, A, Ap = invmatrix(t1[idx], t2[idx])
+  t, X, A, Ap = invmatrix(t1[idx], t2[idx], timescale=timescale)
 
   # number of unique events
   m = length(t)
 
+  @printf("Number of used pairs:    %4d\n", n)
+  @printf("Number of unique events: %4d\n", m)
+
   # cycle skipping correction
-  cs, Δτ = correctcycleskipping(Δτc[idx,:], Δτr[idx,:], Δτl[idx,:], ccc[idx,:], ccr[idx,:],
-                                ccl[idx,:], X, A, Ap)
+  Δτ = correctcycleskipping(t1[idx], t2[idx], Δτc[idx,:], Δτr[idx,:], Δτl[idx,:],
+                                ccc[idx,:], ccr[idx,:], ccl[idx,:], X, A, Ap)
 
   # get travel times
   τ = Ap*[Δτ; zeros(m-2, l)]
@@ -133,9 +136,10 @@ end
 """
 Construct inversion matrix for pairs (`t1`, `t2`). Returns common times `t`, the pair
 matrix `X`, the full design matrix `A`, and the pseudoinverse `Ap`. The inversion can then
-be performed with `Ap*Δτ`.
+be performed with `Ap*Δτ`. If `timescale` is set (in days), smoothing is applied at that
+scale. By default (`timescale=NaN`), smoothing is applied at the sampling scale.
 """
-function invmatrix(t1, t2)
+function invmatrix(t1, t2; timescale=NaN)
 
   # find unique events
   t = sort(unique([t1; t2]))
@@ -161,7 +165,7 @@ function invmatrix(t1, t2)
   # smoothing matrix
   S = zeros(m-2, m)
   for i = 1:m-2
-    Δ = (tr[i+2] - tr[i])/2
+    Δ = isnan(timescale) ? (tr[i+2] - tr[i])/2 : timescale
     S[i,i] = Δ/(tr[i+1] - tr[i])
     S[i,i+1] = -Δ*(1/(tr[i+1] - tr[i]) + 1/(tr[i+2] - tr[i+1]))
     S[i,i+2] = Δ/(tr[i+2] - tr[i+1])
@@ -179,14 +183,13 @@ end
 
 """
 Find cycle skipping corrections. Applies corrections to adjacent maxima of the
-cross-correlation function whenever they reduce the loss function. Returns cycle skipping
-indeces (1=central, 2=right, 3=left) and the corrected ``Δτ``.
+cross-correlation function whenever they reduce the loss function. Returns the corrected
+``Δτ``.
 """
-function correctcycleskipping(Δτc, Δτr, Δτl, ccc, ccr, ccl, X, A, Ap)
-  # cycle skipping correction using a local minimum search
+function correctcycleskipping(t1, t2, Δτc, Δτr, Δτl, ccc, ccr, ccl, X, A, Ap)
   
-  # projector
-  P = A*Ap
+  # residual operator
+  R = I - A*Ap
 
   # number of pairs and unique events
   n, m = size(X)
@@ -194,71 +197,90 @@ function correctcycleskipping(Δτc, Δτr, Δτl, ccc, ccr, ccl, X, A, Ap)
   # number of frequencies
   l = size(Δτc)[2]
 
-  # index used (1 = c, 2 = r, 3 = l)
-  cs = ones(Int, n)
-
   # collect the three delays and CCs
-  Δτa = cat(Δτc, Δτr, Δτl, dims=3)
-  cca = cat(ccc, ccr, ccl, dims=3)
+  Δτa = cat(Δτl, Δτc, Δτr, dims=3)
+  cca = cat(ccl, ccc, ccr, dims=3)
 
   # data vector using central measurements
   b = [Δτc; zeros(m-2, l)]
 
-  # initial cost
-  J = .5*sum((b - P*b).^2)
+  # initial residuals and cost
+  r = R*b
+  J = .5*sum(r.^2)
 
-  # sort such that pairs with largest adjustment are checked for cycle skipping first
-  idx = sortperm(abs.(X*Ap*b[:,1] - Δτc[:,1]), rev=true)
+  # find unique pairs
+  pairs = unique([findall((t1 .== t1[i]) .& (t2 .== t2[i])) for i = 1:n])
 
-  # cycle through pairs until no further corrections are made
-  p = 1
-  while p ≤ n
+  # number of unique pairs
+  nu = length(pairs)
 
-    @printf("\r%4d", p)
+  # index used (start with central)
+  cs = 2ones(Int, nu)
 
-    # pair index
-    i = idx[p]
+  # cycle through unique pairs until no further corrections are made
+  i = 1
+  while i ≤ nu
+
+    @printf("\r%4d", i)
+
+    # sort unique pairs by size of residuals
+    if i == 1
+      res = [mean(r[pairs[i],:].^2) for i = 1:nu]
+      idx = sortperm(res, rev=true)
+      pairs = pairs[idx]
+      cs = cs[idx]
+    end
 
     # corrected this pair?
-    c = false
+    corrected = false
 
-    # cycle over both directions
-    for k = 1:2
+    # trial correction(s)
+    if cs[i] == 1 || cs[i] == 3
+      dir = [2]
+    else
+      dir = [1, 3]
+    end
 
-      # trial correction
-      j = mod1(cs[i]+k, 3)
+    # go through trials
+    for j = dir
 
       # check if neighboring CCs are close to max CCs
-      if all(cca[i,:,j] .>= ccc[i,:] .- .2)
+      if all(cca[pairs[i],:,j] .≥ ccc[pairs[i],:] .- .15)
 
         # swap out Δτ
-        b[i,:] = Δτa[i,:,j]
+        b[pairs[i],:] = Δτa[pairs[i],:,j]
 
-        # new cost
-        Jp = .5*sum((b - P*b).^2)
+        # new residuals and cost
+        rp = R*b
+        Jp = .5*sum(rp.^2)
 
         # record if cost is reduced, revert otherwise
         if Jp < J
           cs[i] = j
           J = Jp
-          c = true
-          @printf("\r%4d %4d %d %7.5f\n", p, i, j, 1e3J/(n+m-2))
+          r = copy(rp)
+          corrected = true
+          @printf("\r%4d %d %7.5f %s\n", i, j, 1e3J/(n+m-2)/l, string(pairs[i]))
         else
-          b[i,:] = Δτa[i,:,cs[i]]
+          b[pairs[i],:] = Δτa[pairs[i],:,cs[i]]
         end
 
       end
     end
 
-    # move back if correction was made or on to next pair
-    p = c ? 1 : p+1
+    # move back to first pair if correction was made, advance otherwise
+    i = corrected ? 1 : i+1
 
   end
 
-  println()
+  @printf("\n")
+  @printf("Total number of unique pairs:            %4d\n", nu)
+  @printf("Number of pairs corrected to left max.:  %4d\n", sum(cs.==1))
+  @printf("Number of uncorrected pairs:             %4d\n", sum(cs.==2))
+  @printf("Number of pairs corrected to right max.: %4d\n", sum(cs.==3))
 
-  # return cycle skipping indices and optimal delays
-  return cs, b[1:n,:]
+  # return optimal delays
+  return b[1:n,:]
 
 end
 
