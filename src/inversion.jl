@@ -73,21 +73,30 @@ function invert(eqname, pstations, tstation, invfreq, mincc; maxΔτ=Inf, exclud
       # read data if present
       if isfile(filename)
 
-        # frequencies
-        frequencies = h5read(filename, "freq")
-        # find frequency indices
-        idx = [argmin(abs.(frequencies.-invfreq[i])) for i = 1:l]
-        # read data
+        # record event times
         push!(t1, pair.event1)
         push!(t2, pair.event2)
+
+        # open file
         fid = h5open(filename, "r")
+
+        # frequencies
+        frequencies = read(fid, "freq")
+
+        # find frequency indices
+        idx = [argmin(abs.(frequencies .- invfreq[i])) for i = 1:l]
+
+        # read data
         push!(Δτc, read(fid, "lagc")[idx])
         push!(Δτr, read(fid, "lagr")[idx])
         push!(Δτl, read(fid, "lagl")[idx])
         push!(ccc, read(fid, "ccc")[idx])
         push!(ccr, read(fid, "ccr")[idx])
         push!(ccl, read(fid, "ccl")[idx])
+
+        # close file
         close(fid)
+
       end
     end
 
