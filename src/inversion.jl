@@ -80,12 +80,14 @@ function invert(eqname, pstations, tstation, invfreq, mincc; maxΔτ=Inf, exclud
         # read data
         push!(t1, pair.event1)
         push!(t2, pair.event2)
-        push!(Δτc, h5read(filename, "lagc")[idx])
-        push!(Δτr, h5read(filename, "lagr")[idx])
-        push!(Δτl, h5read(filename, "lagl")[idx])
-        push!(ccc, h5read(filename, "ccc")[idx])
-        push!(ccr, h5read(filename, "ccr")[idx])
-        push!(ccl, h5read(filename, "ccl")[idx])
+        fid = h5open(filename, "r")
+        push!(Δτc, read(fid, "lagc")[idx])
+        push!(Δτr, read(fid, "lagr")[idx])
+        push!(Δτl, read(fid, "lagl")[idx])
+        push!(ccc, read(fid, "ccc")[idx])
+        push!(ccr, read(fid, "ccr")[idx])
+        push!(ccl, read(fid, "ccl")[idx])
+        close(fid)
       end
     end
 
