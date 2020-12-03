@@ -1,3 +1,6 @@
+# TODO:
+# - exclude outliers
+
 # reference time
 global const tref = DateTime(2000, 1, 1, 0, 0, 0)
 
@@ -5,18 +8,18 @@ global const tref = DateTime(2000, 1, 1, 0, 0, 0)
 global const meanyear = 365.2425
 
 """
-    invert(eqname, pstations, tstation, invfreq, mincc; maxΔτ=Inf, excludetimes=[], timscale=NaN)
+    invert(eqname, tstation, pstations, invfreq, mincc; maxΔτ=Inf, excludetimes=[], timscale=NaN)
 
 Invert measurements of the travel time changes between events ``Δτ`` for travel time
 anomalies ``τ`` relative to an arbitrary but common reference.
 
 # Arguments
 - `eqname::String`: earthquake name to identify experiment.
-- `pstations::String`: list of *P*-wave station designations.
 - `tstation::String`: *T*-wave station designation.
+- `pstations::String`: list of *P*-wave station designations.
 - `invfreq::Array{Float64,1}`: frequencies at which to perform inversion.
 - `mincc::Array{Float64,1}`: minimum CC requirement at the difference `invfreq`.
-- `maxΔτ::Float64=Inf`: maximum allowable ``Δτ``; larger measurements are discarded.
+- `maxΔτ::Float64=Inf`: maximum allowable T-wave ``Δτ``; larger measurements are discarded.
 - `excludetimes::Array{Array{Date,2},1}`: time periods to exclude from inversion.
 - `timescale::Float64=NaN`: time scale at which to apply smoothing; default is to use time
   scale set by the sampling rather than a fixed scale.
@@ -30,135 +33,242 @@ julia> t, τ, τerr = SOT.invert("nias", catalog, ["PSI"], "H08S2..EDH", [2, 4],
 [...]
 ```
 """
-function invert(eqname, pstations, tstation, invfreq, mincc; maxΔτ=Inf, excludetimes=[],
+function invert(eqname, tstation, pstations, invfreq, mincc; maxΔτt=Inf, excludetimes=[],
                timescale=NaN)
 
   # number of frequencies at which to perform inversion
   l = length(invfreq)
 
   # initialize event times
-  t1 = Array{DateTime}(undef, 0)
-  t2 = Array{DateTime}(undef, 0)
+  t1t = Array{DateTime}(undef, 0)
+  t2t = Array{DateTime}(undef, 0)
 
-  # initialize delay measurements
-  Δτc = Array{Array{Float64,1}}(undef, 0)
-  Δτr = Array{Array{Float64,1}}(undef, 0)
-  Δτl = Array{Array{Float64,1}}(undef, 0)
+  # initialize T-wave delay measurements
+  Δτtl = Array{Array{Float64,1}}(undef, 0)
+  Δτtr = Array{Array{Float64,1}}(undef, 0)
+  Δτtc = Array{Array{Float64,1}}(undef, 0)
 
-  # initialize CC measurements
+  # initialize T-wave CC measurements
   ccc = Array{Array{Float64,1}}(undef, 0)
   ccr = Array{Array{Float64,1}}(undef, 0)
   ccl = Array{Array{Float64,1}}(undef, 0)
 
-  # iterate over stations
+  # load and combine catalogs of P-wave pairs
+  catalog = Array{DataFrame,1}(undef, 0)
   for s in pstations
+    push!(catalog, DataFrame(CSV.File("catalogs/$(eqname)_$s.csv", select=[1, 2])))
+  end
+  catalog = sort(unique(vcat(catalog...)))
 
-    # load catalog of P-wave pairs
-    catalog = DataFrame(CSV.File("catalogs/$(eqname)_$s.csv"))
+  # exclude events in specified time periods
+  for i = 1:length(excludetimes)
+    exclude1 = excludetimes[i][1] .< catalog[:event1] .< excludetimes[i][2]
+    exclude2 = excludetimes[i][1] .< catalog[:event2] .< excludetimes[i][2]
+    catalog = catalog[.!(exclude1 .| exclude2),:]
+  end
 
-    # exclude events in specified time periods
-    for i = 1:length(excludetimes)
-      exclude1 = excludetimes[i][1] .< catalog[:event1] .< excludetimes[i][2]
-      exclude2 = excludetimes[i][1] .< catalog[:event2] .< excludetimes[i][2]
-      catalog = catalog[.!(exclude1 .| exclude2),:]
-    end
+  exclude = Array{Int}(undef, 0)
 
-    # loop over all pairs
-    @showprogress for (i, pair) in enumerate(eachrow(catalog))
+  # loop over all pairs
+  @showprogress for (i, pair) in enumerate(eachrow(catalog))
 
-      # file with T-wave data
-      filename = @sprintf("twavedelays/%s_%s_%s/%s_%s.h5", eqname, s, tstation,
-                          pair.event1, pair.event2)
+    # file with T-wave data
+    filename = @sprintf("twavedelays/%s_%s/%s_%s.h5", eqname, tstation,
+                        pair.event1, pair.event2)
 
-      # read data if present
-      if isfile(filename)
+    # read data if present
+    if isfile(filename)
+
+      # open file
+      fid = h5open(filename, "r")
+
+      # frequencies
+      frequencies = read(fid, "freq")
+
+      # find frequency indices
+      idx = [argmin(abs.(frequencies .- invfreq[i])) for i = 1:l]
+
+      # read central delay and CC
+      Δτt = read(fid, "lagc")[idx]
+      cc = read(fid, "ccc")[idx]
+
+      # check if criteria are met
+      if all(cc .> mincc) && all(abs.(Δτt) .< maxΔτt)
 
         # record event times
-        push!(t1, pair.event1)
-        push!(t2, pair.event2)
-
-        # open file
-        fid = h5open(filename, "r")
-
-        # frequencies
-        frequencies = read(fid, "freq")
-
-        # find frequency indices
-        idx = [argmin(abs.(frequencies .- invfreq[i])) for i = 1:l]
+        push!(t1t, pair.event1)
+        push!(t2t, pair.event2)
 
         # read data
-        push!(Δτc, read(fid, "lagc")[idx])
-        push!(Δτr, read(fid, "lagr")[idx])
-        push!(Δτl, read(fid, "lagl")[idx])
-        push!(ccc, read(fid, "ccc")[idx])
-        push!(ccr, read(fid, "ccr")[idx])
+        push!(Δτtl, read(fid, "lagl")[idx])
+        push!(Δτtc, Δτt)
+        push!(Δτtr, read(fid, "lagr")[idx])
         push!(ccl, read(fid, "ccl")[idx])
+        push!(ccc, cc)
+        push!(ccr, read(fid, "ccr")[idx])
 
-        # close file
-        close(fid)
+      else
+
+        # record excluded event
+        push!(exclude, i)
 
       end
-    end
 
+      # close file
+      close(fid)
+
+    else
+
+      # record missing file
+      push!(exclude, i)
+
+    end
   end
 
   # concatenate into arrays
-  Δτc = hcat(Δτc...)'
-  Δτr = hcat(Δτr...)'
-  Δτl = hcat(Δτl...)'
+  Δτtc = hcat(Δτtc...)'
+  Δτtr = hcat(Δτtr...)'
+  Δτtl = hcat(Δτtl...)'
   ccc = hcat(ccc...)'
   ccr = hcat(ccr...)'
   ccl = hcat(ccl...)'
 
-  # select good pairs
-  idx = all(ccc .≥ mincc'; dims=2)[:,1] .& (abs.(Δτc[:,1]) .≤ maxΔτ)
+  # remove pairs from catalog that were excluded
+  delete!(catalog, sort(unique(exclude)))
 
-  # number of good pairs
-  n = sum(idx)
+  # initialize event times
+  t1p = Array{DateTime}(undef, 0)
+  t2p = Array{DateTime}(undef, 0)
+
+  # initialize P-wave delay measurements
+  Δτp = Array{Float64}(undef, 0)
+
+  # iterate over P-wave stations
+  for s in pstations
+
+    # load catalog of P-wave pairs
+    pcatalog = DataFrame(CSV.File("catalogs/$(eqname)_$s.csv"))
+
+    # iterate over all pairs in P-wave catalog
+    for (i, pair) in enumerate(eachrow(pcatalog))
+
+      # record if T-wave measurement is present
+      if any((pair.event1 .== catalog.event1) .& (pair.event2 .== catalog.event2))
+
+        # record event times
+        push!(t1p, pair.event1)
+        push!(t2p, pair.event2)
+
+        # record measurement
+        push!(Δτp, pair.origincorrection)
+
+      end
+
+    end
+
+  end
+
+#  # select good pairs
+#  idx = all(ccc .≥ mincc'; dims=2)[:,1] .& (abs.(Δτc[:,1]) .≤ maxΔτ)
 
   # perform inversion
-  t, X, A, Ap = invmatrix(t1[idx], t2[idx], timescale=timescale)
+  t, A, Ap = invmatrix(t1t, t2t, t1p, t2p; timescale)
+
+  # number of good T-wave pairs
+  nt = length(t1t)
+
+  # number of good P-wave pairs
+  np = length(t1p)
 
   # number of unique events
   m = length(t)
 
-  @printf("Number of used pairs:    %4d\n", n)
+  @printf("Number of T-wave pairs:  %4d\n", nt)
+  @printf("Number of P-wave pairs:  %4d\n", np)
   @printf("Number of unique events: %4d\n", m)
 
   # cycle skipping correction
-  Δτ = correctcycleskipping(t1[idx], t2[idx], Δτc[idx,:], Δτr[idx,:], Δτl[idx,:],
-                                ccc[idx,:], ccr[idx,:], ccl[idx,:], X, A, Ap)
+  Δτt = correctcycleskipping(Δτtl, Δτtc, Δτtr, ccl, ccc, ccr, Δτp, A, Ap)
 
   # get travel times
-  τ = Ap*[Δτ; zeros(m-2, l)]
+  τa = Ap*[Δτt; repeat(Δτp, 1, l); zeros(m-2, l)]
+  τ = τa[1:m,:] - τa[m+1:2m,:]
 
   # calculate error
-  if n > m + 1
+  if nt + np > m + 1
     H = diag(pinv(A'*A))
-    τerr = sqrt.(1/(n-m-1)*sum((Δτ - X*τ).^2, dims=1).*H)
+    se = 1/(nt+np-m-1)*sum(([Δτt; repeat(Δτp, 1, l)] - A[1:nt+np,:]*τa).^2, dims=1)
+    τaerr = sqrt.(se.*H)
+    τerr = sqrt.(τaerr[1:m,:].^2 + τaerr[m+1:2m,:].^2)
   else
     τerr = Inf
   end
+
+  # inverted delays
+  Δτti = A[1:nt,:]*τa
+  Δτpi = A[nt+1:nt+np,:]*τa
+
+  # plot measured vs. inverted T-wave delays
+  fig, ax = subplots(1, 1)
+  ax.scatter(Δτt[:,1], A[1:nt,:]*τa[:,1], s=5)
+  ax.set_aspect(1)
+  xlim = ax.get_xlim()
+  ylim = ax.get_ylim()
+  x = [-2maxΔτt, 2maxΔτt]
+  ax.plot(x, x, color="black", linewidth=.8)
+  ax.plot(x, x .+ 1/invfreq[1], color="black", linewidth=.8, zorder=0)
+  ax.plot(x, x .- 1/invfreq[1], color="black", linewidth=.8, zorder=0)
+  ax.plot(x, x .+ 1/2invfreq[1], color="black", linewidth=.8, zorder=0)
+  ax.plot(x, x .- 1/2invfreq[1], color="black", linewidth=.8, zorder=0)
+  ax.set_xlim(xlim)
+  ax.set_ylim(ylim)
+  ax.set_title("T waves")
+  ax.set_xlabel("measured delay (s)")
+  ax.set_ylabel("inverted delay (s)")
+
+  # plot measured vs. inverted P-wave delays
+  fig, ax = subplots(1, 1)
+  scatter(Δτp[:,1], A[nt+1:nt+np,:]*τa[:,1], s=5)
+  ax.set_aspect(1)
+  xlim = ax.get_xlim()
+  ylim = ax.get_ylim()
+  x = [-2maxΔτt, 2maxΔτt]
+  ax.plot(x, x, color="black", linewidth=.8)
+  ax.plot(x, x .+ 1/invfreq[1], color="black", linewidth=.8, zorder=0)
+  ax.plot(x, x .- 1/invfreq[1], color="black", linewidth=.8, zorder=0)
+  ax.plot(x, x .+ 1/2invfreq[1], color="black", linewidth=.8, zorder=0)
+  ax.plot(x, x .- 1/2invfreq[1], color="black", linewidth=.8, zorder=0)
+  ax.set_xlim(xlim)
+  ax.set_ylim(ylim)
+  ax.set_title("P waves")
+  ax.set_xlabel("measured delay (s)")
+  ax.set_ylabel("inverted delay (s)")
 
   return t, τ, τerr
 
 end
 
 """
-Construct inversion matrix for pairs (`t1`, `t2`). Returns common times `t`, the pair
-matrix `X`, the full design matrix `A`, and the pseudoinverse `Ap`. The inversion can then
-be performed with `Ap*Δτ`. If `timescale` is set (in days), smoothing is applied at that
-scale. By default (`timescale=NaN`), smoothing is applied at the sampling scale.
+    invmatrix(t1t, t2t, t1p, t2p; timescale=NaN)
+
+Construct inversion matrix for T-wave pairs (`t1t`, `t2t`) and P-wave pairs (`t1p`, `t2p`).
+Returns common times `t`, the design matrix `A`, and the pseudoinverse `Ap`. The inversion
+can then be performed with `Ap*[Δτt; Δτp; zeros(m-2)`, where `m` is the number of unique
+events (length of `t`). If `timescale` is set (in days), smoothing is applied at that scale.
+By default (`timescale=NaN`), smoothing is applied at the sampling scale.
 """
-function invmatrix(t1, t2; timescale=NaN)
+function invmatrix(t1t, t2t, t1p, t2p; timescale=NaN)
 
   # find unique events
-  t = sort(unique([t1; t2]))
-  idx1 = indexin(t1, t)
-  idx2 = indexin(t2, t)
+  t = sort(unique([t1t; t2t]))
+  idx1t = indexin(t1t, t)
+  idx2t = indexin(t2t, t)
+  idx1p = indexin(t1p, t)
+  idx2p = indexin(t2p, t)
 
-  # number of pairs
-  n = length(t1)
+  # number of T- and P-wave pairs
+  nt = length(t1t)
+  np = length(t1p)
 
   # number of unique events
   m = length(t)
@@ -166,11 +276,18 @@ function invmatrix(t1, t2; timescale=NaN)
   # time in days
   tr = float.(Dates.value.(t .- tref))/1000/3600/24
 
-  # pair matrix
-  X = zeros(n, m)
-  for i = 1:n
-    X[i,idx1[i]] = -1
-    X[i,idx2[i]] = 1
+  # T-wave pair matrix
+  Xt = zeros(nt, m)
+  for i = 1:nt
+    Xt[i,idx1t[i]] = -1
+    Xt[i,idx2t[i]] = 1
+  end
+
+  # P-wave pair matrix
+  Xp = zeros(np, m)
+  for i = 1:np
+    Xp[i,idx1p[i]] = -1
+    Xp[i,idx2p[i]] = 1
   end
 
   # smoothing matrix
@@ -183,70 +300,67 @@ function invmatrix(t1, t2; timescale=NaN)
   end
 
   # full design matrix
-  A = [X; S]
+  A = [Xt zeros(nt, m); zeros(np, m) Xp; S/2 -S/2]
 
   # calculate pseudoinverse
   Ap = pinv(A)
 
-  return t, X, A, Ap
+  return t, A, Ap
 
 end
 
 """
-Find cycle skipping corrections. Applies corrections to adjacent maxima of the
-cross-correlation function whenever they reduce the loss function. Returns the corrected
-``Δτ``.
+    correctcycleskipping(Δτtl, Δτtc, Δτtr, ccl, ccc, ccr, Δτp, A, Ap)
+
+Find cycle-skipping corrections. Applies corrections to adjacent maxima of the
+cross-correlation function whenever they reduce the cost function. Returns the corrected
+T-wave delays ``Δτt``.
 """
-function correctcycleskipping(t1, t2, Δτc, Δτr, Δτl, ccc, ccr, ccl, X, A, Ap)
+function correctcycleskipping(Δτtl, Δτtc, Δτtr, ccl, ccc, ccr, Δτp, A, Ap)
   
   # residual operator
   R = I - A*Ap
 
-  # number of pairs and unique events
-  n, m = size(X)
+  # number of unique events
+  m = size(A, 2)÷2
 
-  # number of frequencies
-  l = size(Δτc)[2]
+  # number of T-wave pairs and frequencies
+  nt, l = size(Δτtc)
+
+  # number of P-wave pairs
+  np = length(Δτp)
 
   # collect the three delays and CCs
-  Δτa = cat(Δτl, Δτc, Δτr, dims=3)
+  Δτa = cat(Δτtl, Δτtc, Δτtr, dims=3)
   cca = cat(ccl, ccc, ccr, dims=3)
 
   # data vector using central measurements
-  b = [Δτc; zeros(m-2, l)]
+  b = [Δτtc; repeat(Δτp, 1, l); zeros(m-2, l)]
 
   # initial residuals and cost
   r = R*b
   J = .5*sum(r.^2)
 
-  # find unique pairs
-  pairs = unique([findall((t1 .== t1[i]) .& (t2 .== t2[i])) for i = 1:n])
-
-  # number of unique pairs
-  nu = length(pairs)
-
   # index used (start with central)
-  cs = 2ones(Int, nu)
+  cs = 2ones(Int, nt)
 
-  # cycle through unique pairs until no further corrections are made
+  # cycle through T-wave pairs until no further corrections are made
   i = 1
-  while i ≤ nu
+  idx = nothing
+  while i ≤ nt
 
     @printf("\r%4d", i)
 
     # sort unique pairs by size of residuals
     if i == 1
-      res = [mean(r[pairs[i],:].^2) for i = 1:nu]
-      idx = sortperm(res, rev=true)
-      pairs = pairs[idx]
-      cs = cs[idx]
+      idx = sortperm(r[1:nt].^2, rev=true)
     end
 
     # corrected this pair?
     corrected = false
 
     # trial correction(s)
-    if cs[i] == 1 || cs[i] == 3
+    if cs[idx[i]] == 1 || cs[idx[i]] == 3
       dir = [2]
     else
       dir = [1, 3]
@@ -256,10 +370,10 @@ function correctcycleskipping(t1, t2, Δτc, Δτr, Δτl, ccc, ccr, ccl, X, A, 
     for j = dir
 
       # check if neighboring CCs are close to max CCs
-      if all(cca[pairs[i],:,j] .≥ ccc[pairs[i],:] .- .15)
+      if all(cca[idx[i],:,j] .≥ ccc[idx[i],:] .- 0.15)
 
         # swap out Δτ
-        b[pairs[i],:] = Δτa[pairs[i],:,j]
+        b[idx[i],:] = Δτa[idx[i],:,j]
 
         # new residuals and cost
         rp = R*b
@@ -267,13 +381,13 @@ function correctcycleskipping(t1, t2, Δτc, Δτr, Δτl, ccc, ccr, ccl, X, A, 
 
         # record if cost is reduced, revert otherwise
         if Jp < J
-          cs[i] = j
+          cs[idx[i]] = j
           J = Jp
           r = copy(rp)
           corrected = true
-          @printf("\r%4d %d %7.5f %s\n", i, j, 1e3J/(n+m-2)/l, string(pairs[i]))
+          @printf("\r%4d %4d %d %7.5f\n", i, idx[i], j, 1e3J/(nt+np+m-2)/l)
         else
-          b[pairs[i],:] = Δτa[pairs[i],:,cs[i]]
+          b[idx[i],:] = Δτa[idx[i],:,cs[idx[i]]]
         end
 
       end
@@ -285,13 +399,13 @@ function correctcycleskipping(t1, t2, Δτc, Δτr, Δτl, ccc, ccr, ccl, X, A, 
   end
 
   @printf("\n")
-  @printf("Total number of unique pairs:            %4d\n", nu)
+  @printf("Total number of T-wave pairs:            %4d\n", nt)
   @printf("Number of pairs corrected to left max.:  %4d\n", sum(cs.==1))
   @printf("Number of uncorrected pairs:             %4d\n", sum(cs.==2))
   @printf("Number of pairs corrected to right max.: %4d\n", sum(cs.==3))
 
   # return optimal delays
-  return b[1:n,:]
+  return b[1:nt,:]
 
 end
 

@@ -1,4 +1,5 @@
 # TODO:
+# - Make sure the P-wave pairs detected with TM have consistent time stamps
 # - Allow for clock error corrections (before cutting).
 
 # Earth's radius
@@ -8,15 +9,15 @@ global const earthradius = 6371e3
 global const soundspeed = 1.51e3
 
 """
-    twavepick(eqname, pstation, tstation, starttime, endtime, frequencies, avgwidth, reffreq; saveplot=false)
+    twavepick(eqname, tstation, pstations, starttime, endtime, frequencies, avgwidth, reffreq; saveplot=false)
 
 Picks the lags at which the cross-correlation function between pairs is maximized, saving
 the results to file.
 
 # Arguments
 - `eqname::String`: earthquake name to identify experiment.
-- `pstation::String`: *P*-wave station designation.
 - `tstation::String`: *T*-wave station designation.
+- `pstations::String`: list of *P*-wave station designations.
 - `starttime::Float64`: beginning of time window in number of seconds before predicted
   arrival time.
 - `endtime::Float64`: end of time window in number of seconds after predicted arrival time.
@@ -27,15 +28,19 @@ the results to file.
 
 # Example
 ```
-julia> twavepick("nias", catalog, "H08S2..EDH", "PSI", 10, 70, 0.1:0.1:10, 0.5, 2.0)
+julia> twavepick("nias", "H08S2..EDH", ["PSI", "KUM", "WRAB"], 10, 70, 0.1:0.1:10, 0.5, 2.0)
 [...]
 ```
 """
-function twavepick(eqname, pstation, tstation, starttime, endtime, frequencies, avgwidth,
+function twavepick(eqname, tstation, pstations, starttime, endtime, frequencies, avgwidth,
                    reffreq; saveplot=false)
 
-  # load catalog of P-wave pairs
-  catalog = DataFrame(CSV.File("catalogs/$(eqname)_$pstation.csv"))
+  # load and combine catalogs of P-wave pairs
+  catalog = Array{DataFrame,1}(undef, 0)
+  for s in pstations
+    push!(catalog, DataFrame(CSV.File("catalogs/$(eqname)_$s.csv", select=[1, 2])))
+  end
+  catalog = sort(unique(vcat(catalog...)))
 
   # iterate over pairs
   for (i, pair) in enumerate(eachrow(catalog))
@@ -49,10 +54,10 @@ function twavepick(eqname, pstation, tstation, starttime, endtime, frequencies, 
                      tstation)
 
     # file to which measurements are saved
-    savepath = @sprintf("twavedelays/%s_%s_%s", eqname, pstation, tstation)
+    savepath = @sprintf("twavedelays/%s_%s", eqname, tstation)
     !isdir(savepath) && mkdir(savepath)
     filename = @sprintf("%s/%s_%s.h5", savepath, pair.event1, pair.event2)
-    figpath = @sprintf("twaveplots/%s_%s_%s", eqname, pstation, tstation)
+    figpath = @sprintf("twaveplots/%s_%s", eqname, tstation)
     !isdir(figpath) && mkdir(figpath)
 
     # check whether all data is present
@@ -134,9 +139,6 @@ function twavepick(eqname, pstation, tstation, starttime, endtime, frequencies, 
         # correct for difference in initial times
         lags .+= time2[1] - time1[1]
 
-        # correct for P-wave origin time
-        lags .-= pair.origincorrection
-
         # pick max CC and adjacent max
         lagc, lagr, lagl, ccc, ccr, ccl = findmaxcc(cc, frequencies, lags, reffreq, fs)
         i0 = argmin(abs.(frequencies .- reffreq))
@@ -159,14 +161,14 @@ function twavepick(eqname, pstation, tstation, starttime, endtime, frequencies, 
         end
 
         # save to file
-        h5open(filename, "w") do file
-          write(file, "freq", collect(frequencies))
-          write(file, "lagc", lagc)
-          write(file, "lagr", lagr)
-          write(file, "lagl", lagl)
-          write(file, "ccc", ccc)
-          write(file, "ccr", ccr)
-          write(file, "ccl", ccl)
+        h5open(filename, "w") do fid
+          write(fid, "freq", collect(frequencies))
+          write(fid, "lagc", lagc)
+          write(fid, "lagr", lagr)
+          write(fid, "lagl", lagl)
+          write(fid, "ccc", ccc)
+          write(fid, "ccr", ccr)
+          write(fid, "ccl", ccl)
         end
 
       end
