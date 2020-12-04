@@ -38,7 +38,8 @@ function twavepick(eqname, tstation, pstations, starttime, endtime, frequencies,
   # load and combine catalogs of P-wave pairs
   catalog = Array{DataFrame,1}(undef, 0)
   for s in pstations
-    push!(catalog, DataFrame(CSV.File("catalogs/$(eqname)_$s.csv", select=[1, 2])))
+    push!(catalog, DataFrame(CSV.File("catalogs/$(eqname)_$s.csv", select=[1, 2],
+                                      comment="#")))
   end
   catalog = sort(unique(vcat(catalog...)))
 

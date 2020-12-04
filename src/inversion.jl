@@ -1,5 +1,5 @@
 # TODO:
-# - exclude outliers
+# - Generate catalog of used P-wave pairs and stations
 
 # reference time
 global const tref = DateTime(2000, 1, 1, 0, 0, 0)
@@ -26,10 +26,10 @@ anomalies ``τ`` relative to an arbitrary but common reference.
 
 # Examples
 ```
-julia> t, τ, τerr = SOT.invert("nias", catalog, ["PSI"], "H08S2..EDH", [2, 4], [0.6, 0.4]; Δτmax=0.65)
+julia> t, τ, τerr = SOT.invert("nias", "H08S2..EDH", ["PSI"], [2, 4], [0.6, 0.4])
 [...]
 
-julia> t, τ, τerr = SOT.invert("nias", catalog, ["PSI"], "H08S2..EDH", [2, 4], [0.6, 0.4]; Δτmax=0.65, excludetimes=[[Date(2001, 1, 1) Date(2004, 12, 1)], [Date(2010, 1, 1) Date(2012, 1, 20)]])
+julia> t, τ, τerr = SOT.invert("nias", "H08S2..EDH", ["PSI"], [2, 4], [0.6, 0.4]; excludetimes=[[Date(2001, 1, 1) Date(2004, 12, 1)], [Date(2010, 1, 1) Date(2012, 1, 20)]])
 [...]
 ```
 """
@@ -56,7 +56,8 @@ function invert(eqname, tstation, pstations, invfreq, mincc; maxΔτt=Inf, exclu
   # load and combine catalogs of P-wave pairs
   catalog = Array{DataFrame,1}(undef, 0)
   for s in pstations
-    push!(catalog, DataFrame(CSV.File("catalogs/$(eqname)_$s.csv", select=[1, 2])))
+    push!(catalog, DataFrame(CSV.File("catalogs/$(eqname)_$s.csv", select=[1, 2],
+                                      comment="#")))
   end
   catalog = sort(unique(vcat(catalog...)))
 
@@ -147,7 +148,7 @@ function invert(eqname, tstation, pstations, invfreq, mincc; maxΔτt=Inf, exclu
   for s in pstations
 
     # load catalog of P-wave pairs
-    pcatalog = DataFrame(CSV.File("catalogs/$(eqname)_$s.csv"))
+    pcatalog = DataFrame(CSV.File("catalogs/$(eqname)_$s.csv", comment="#"))
 
     # iterate over all pairs in P-wave catalog
     for (i, pair) in enumerate(eachrow(pcatalog))
@@ -172,7 +173,7 @@ function invert(eqname, tstation, pstations, invfreq, mincc; maxΔτt=Inf, exclu
 #  idx = all(ccc .≥ mincc'; dims=2)[:,1] .& (abs.(Δτc[:,1]) .≤ maxΔτ)
 
   # perform inversion
-  t, A, Ap = invmatrix(t1t, t2t, t1p, t2p; timescale)
+  t, E, S, P = invmatrix(t1t, t2t, t1p, t2p; timescale)
 
   # number of good T-wave pairs
   nt = length(t1t)
@@ -188,16 +189,16 @@ function invert(eqname, tstation, pstations, invfreq, mincc; maxΔτt=Inf, exclu
   @printf("Number of unique events: %4d\n", m)
 
   # cycle skipping correction
-  Δτt = correctcycleskipping(Δτtl, Δτtc, Δτtr, ccl, ccc, ccr, Δτp, A, Ap)
+  Δτt = correctcycleskipping(Δτtl, Δτtc, Δτtr, ccl, ccc, ccr, Δτp, E, P)
 
   # get travel times
-  τa = Ap*[Δτt; repeat(Δτp, 1, l); zeros(m-2, l)]
+  τa = P*E'*[Δτt; repeat(Δτp, 1, l)]
   τ = τa[1:m,:] - τa[m+1:2m,:]
 
   # calculate error
   if nt + np > m + 1
-    H = diag(pinv(A'*A))
-    se = 1/(nt+np-m-1)*sum(([Δτt; repeat(Δτp, 1, l)] - A[1:nt+np,:]*τa).^2, dims=1)
+    H = diag(P)
+    se = 1/(nt+np-m-1)*sum(([Δτt; repeat(Δτp, 1, l)] - E*τa).^2, dims=1)
     τaerr = sqrt.(se.*H)
     τerr = sqrt.(τaerr[1:m,:].^2 + τaerr[m+1:2m,:].^2)
   else
@@ -205,12 +206,16 @@ function invert(eqname, tstation, pstations, invfreq, mincc; maxΔτt=Inf, exclu
   end
 
   # inverted delays
-  Δτti = A[1:nt,:]*τa
-  Δτpi = A[nt+1:nt+np,:]*τa
+  Δτti = E[1:nt,:]*τa
+  Δτpi = E[nt+1:nt+np,:]*τa
+
+  idx = sortperm(abs.(Δτt[:,1] - Δτti[:,1]), rev=true)
+  println("Largest five T-wave residuals:")
+  println(catalog[idx,:][1:5,:])
 
   # plot measured vs. inverted T-wave delays
   fig, ax = subplots(1, 1)
-  ax.scatter(Δτt[:,1], A[1:nt,:]*τa[:,1], s=5)
+  ax.scatter(Δτt[:,1], Δτti[:,1], s=5)
   ax.set_aspect(1)
   xlim = ax.get_xlim()
   ylim = ax.get_ylim()
@@ -228,7 +233,7 @@ function invert(eqname, tstation, pstations, invfreq, mincc; maxΔτt=Inf, exclu
 
   # plot measured vs. inverted P-wave delays
   fig, ax = subplots(1, 1)
-  scatter(Δτp[:,1], A[nt+1:nt+np,:]*τa[:,1], s=5)
+  scatter(Δτp[:,1], Δτpi[:,1], s=5)
   ax.set_aspect(1)
   xlim = ax.get_xlim()
   ylim = ax.get_ylim()
@@ -252,10 +257,11 @@ end
     invmatrix(t1t, t2t, t1p, t2p; timescale=NaN)
 
 Construct inversion matrix for T-wave pairs (`t1t`, `t2t`) and P-wave pairs (`t1p`, `t2p`).
-Returns common times `t`, the design matrix `A`, and the pseudoinverse `Ap`. The inversion
-can then be performed with `Ap*[Δτt; Δτp; zeros(m-2)`, where `m` is the number of unique
-events (length of `t`). If `timescale` is set (in days), smoothing is applied at that scale.
-By default (`timescale=NaN`), smoothing is applied at the sampling scale.
+Returns common times `t`, the design matrix `E`, the smoothing matrix `S`, and the
+pseudoinverse `P = pinv(E'*E + S'*S)`. The inversion can then be performed with
+`P*E'*[Δτt; Δτp]`. (See Wunsch: Discrete Inverse and State Estimation Problems, p. 56.) If
+`timescale` is set (in days), smoothing is applied at that scale. By default
+(`timescale=NaN`), smoothing is applied at the sampling scale.
 """
 function invmatrix(t1t, t2t, t1p, t2p; timescale=NaN)
 
@@ -300,12 +306,15 @@ function invmatrix(t1t, t2t, t1p, t2p; timescale=NaN)
   end
 
   # full design matrix
-  A = [Xt zeros(nt, m); zeros(np, m) Xp; S/2 -S/2]
+  E = [Xt zeros(nt, m); zeros(np, m) Xp]
+
+  # full smoothing matrix
+  S = [S/2 -S/2]
 
   # calculate pseudoinverse
-  Ap = pinv(A)
+  P = pinv(E'*E + S'*S)
 
-  return t, A, Ap
+  return t, E, S, P
 
 end
 
@@ -316,13 +325,13 @@ Find cycle-skipping corrections. Applies corrections to adjacent maxima of the
 cross-correlation function whenever they reduce the cost function. Returns the corrected
 T-wave delays ``Δτt``.
 """
-function correctcycleskipping(Δτtl, Δτtc, Δτtr, ccl, ccc, ccr, Δτp, A, Ap)
+function correctcycleskipping(Δτtl, Δτtc, Δτtr, ccl, ccc, ccr, Δτp, E, P)
   
   # residual operator
-  R = I - A*Ap
+  R = I - E*P*E'
 
   # number of unique events
-  m = size(A, 2)÷2
+  m = size(E, 2)÷2
 
   # number of T-wave pairs and frequencies
   nt, l = size(Δτtc)
@@ -335,7 +344,7 @@ function correctcycleskipping(Δτtl, Δτtc, Δτtr, ccl, ccc, ccr, Δτp, A, A
   cca = cat(ccl, ccc, ccr, dims=3)
 
   # data vector using central measurements
-  b = [Δτtc; repeat(Δτp, 1, l); zeros(m-2, l)]
+  b = [Δτtc; repeat(Δτp, 1, l)]
 
   # initial residuals and cost
   r = R*b
@@ -431,22 +440,22 @@ function lineartrend(t, b; fitannual=false, fitsemiannual=false)
   ω = 2π/meanyear
 
   # design matrix for linear regression
-  A = [tr ones(m)]
+  E = [tr ones(m)]
 
   # add annual cycle
   if fitannual
-    A = hcat(A, sin.(ω*tr), cos.(ω*tr))
+    E = hcat(E, sin.(ω*tr), cos.(ω*tr))
   end
 
   # add semiannual cycle
   if fitsemiannual
-    A = hcat(A, sin.(2ω*tr), cos.(2ω*tr))
+    E = hcat(E, sin.(2ω*tr), cos.(2ω*tr))
   end
 
   # invert
-  c = A\b
+  c = E\b
 
   # return coefficients and adjusted data
-  return c, A*c
+  return c, E*c
 
 end

@@ -1,3 +1,6 @@
+# TODO:
+# - Understand large anomalies in 2017 — clock error?
+
 using .SOT, PyPlot, Printf, Dates
 
 # identifier for experiment

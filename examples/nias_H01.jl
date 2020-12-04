@@ -1,3 +1,6 @@
+# TODO:
+# - remove pairs that cause |Δτt| > 20
+
 using .SOT, PyPlot, Printf, Dates
 
 # identifier for experiment
