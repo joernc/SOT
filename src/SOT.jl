@@ -1,6 +1,6 @@
 module SOT
 
-using LinearAlgebra, Dates, DataFrames, Seis, Printf, HDF5, FFTW, PyPlot, Statistics, ProgressMeter, CSV
+using LinearAlgebra, Dates, DataFrames, Seis, Printf, HDF5, FFTW, PyPlot, Statistics, ProgressMeter, CSV, SparseArrays
 
 export twavepick, invert, lineartrend
 

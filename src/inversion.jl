@@ -1,5 +1,6 @@
 # TODO:
 # - Generate catalog of used P-wave pairs and stations
+# - Use sparse QR decomposition if inversion matrix becomes too big
 
 # reference time
 global const tref = DateTime(2000, 1, 1, 0, 0, 0)
@@ -198,36 +199,25 @@ function invmatrix(tpairs, ppairs; timescale=NaN)
   tr = float.(Dates.value.(t .- tref))/1000/3600/24
 
   # T-wave pair matrix
-  Xt = zeros(nt, m)
-  for i = 1:nt
-    Xt[i,tidx1[i]] = -1
-    Xt[i,tidx2[i]] = 1
-  end
+  Xt = sparse([1:nt; 1:nt], [tidx1; tidx2], [-ones(nt); ones(nt)])
 
   # P-wave pair matrix
-  Xp = zeros(np, m)
-  for i = 1:np
-    Xp[i,pidx1[i]] = -1
-    Xp[i,pidx2[i]] = 1
-  end
+  Xp = sparse([1:np; 1:np], [pidx1; pidx2], [-ones(np); ones(np)])
 
   # smoothing matrix
-  S = zeros(m-2, m)
-  for i = 1:m-2
-    Δ = isnan(timescale) ? (tr[i+2] - tr[i])/2 : timescale
-    S[i,i] = Δ/(tr[i+1] - tr[i])
-    S[i,i+1] = -Δ*(1/(tr[i+1] - tr[i]) + 1/(tr[i+2] - tr[i+1]))
-    S[i,i+2] = Δ/(tr[i+2] - tr[i+1])
-  end
+  Δ = isnan(timescale) ? (tr[3:m] - tr[1:m-2])/2 : timescale*ones(m)
+  S = spdiagm(m-2, m, 0 => Δ ./ (tr[2:m-1] - tr[1:m-2]),
+              1 => -Δ.*(1 ./ (tr[2:m-1] - tr[1:m-2]) + 1 ./ (tr[3:m] - tr[2:m-1])),
+              2 => Δ ./ (tr[3:m] - tr[2:m-1]))
 
   # full design matrix
-  E = [Xt zeros(nt, m); zeros(np, m) Xp]
+  E = [Xt spzeros(nt, m); spzeros(np, m) Xp]
 
   # full smoothing matrix
   S = [S/2 -S/2]
 
   # calculate pseudoinverse
-  P = pinv(E'*E + S'*S)
+  P = pinv(Array(E'*E + S'*S))
 
   return t, E, S, P
 
