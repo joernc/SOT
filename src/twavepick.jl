@@ -1,5 +1,4 @@
 # TODO:
-# - Make sure the P-wave pairs detected with TM have consistent time stamps
 # - Allow for clock error corrections (before cutting).
 
 # Earth's radius

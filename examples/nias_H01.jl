@@ -10,7 +10,7 @@ eqname = "nias"
 pstations = ["PSI", "KUM", "WRAB"]
 
 # T-wave station and channel
-tstation = "H01W3..EDH"
+tstations = ["H01W1..EDH", "H01W3..EDH"]
 
 # time window (seconds before and after predicted arrival time)
 starttime = 10
@@ -38,11 +38,54 @@ maxΔτt = 20.
 excludetimes = [[Date(2001, 1, 1) Date(2004, 12, 1)]]
 
 # measure T-wave lags Δτ
-SOT.twavepick(eqname, tstation, pstations, starttime, endtime, frequencies, avgwidth,
-              reffreq; saveplot=true)
+for s in tstations
+  SOT.twavepick(eqname, s, pstations, starttime, endtime, frequencies, avgwidth, reffreq;
+                saveplot=true)
+end
 
 # invert for travel time anomalies τ
-t, τ, τerr = SOT.invert(eqname, tstation, pstations, invfreq, mincc; maxΔτt, excludetimes)
+t, τ, τerr, tpairs, ppairs = SOT.invert(eqname, tstations, pstations, invfreq, mincc;
+                                        maxΔτt, excludetimes)
+
+# number of used T- and P-wave pairs
+nt = size(tpairs, 1)
+np = size(ppairs, 1)
+
+# plot measured vs. inverted T-wave delays (lowest freq.)
+fig, ax = subplots(1, 1)
+ax.scatter([tpairs.Δτ[i,1] for i = 1:nt], [tpairs.Δτi[i,1] for i = 1:nt], s=5)
+ax.set_aspect(1)
+xl = ax.get_xlim()
+yl = ax.get_ylim()
+x = [-2maxΔτt, 2maxΔτt]
+ax.plot(x, x, color="black", linewidth=.8)
+ax.plot(x, x .+ 1/invfreq[1], color="black", linewidth=.8, zorder=0)
+ax.plot(x, x .- 1/invfreq[1], color="black", linewidth=.8, zorder=0)
+ax.plot(x, x .+ 1/2invfreq[1], color="black", linewidth=.8, zorder=0)
+ax.plot(x, x .- 1/2invfreq[1], color="black", linewidth=.8, zorder=0)
+ax.set_xlim(xl)
+ax.set_ylim(yl)
+ax.set_title("T waves")
+ax.set_xlabel("measured delay (s)")
+ax.set_ylabel("inverted delay (s)")
+
+# plot measured vs. inverted P-wave delays (lowest freq.)
+fig, ax = subplots(1, 1)
+ax.scatter(ppairs.Δτ, [ppairs.Δτi[i][1] for i = 1:np], s=5)
+ax.set_aspect(1)
+xl = ax.get_xlim()
+yl = ax.get_ylim()
+x = [-2maxΔτt, 2maxΔτt]
+ax.plot(x, x, color="black", linewidth=.8)
+ax.plot(x, x .+ 1/invfreq[1], color="black", linewidth=.8, zorder=0)
+ax.plot(x, x .- 1/invfreq[1], color="black", linewidth=.8, zorder=0)
+ax.plot(x, x .+ 1/2invfreq[1], color="black", linewidth=.8, zorder=0)
+ax.plot(x, x .- 1/2invfreq[1], color="black", linewidth=.8, zorder=0)
+ax.set_xlim(xl)
+ax.set_ylim(yl)
+ax.set_title("P waves")
+ax.set_xlabel("measured delay (s)")
+ax.set_ylabel("inverted delay (s)")
 
 # plot timeseries
 colors = matplotlib.rcParams["axes.prop_cycle"].by_key()["color"]
