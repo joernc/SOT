@@ -1,6 +1,6 @@
 # TODO:
 # - Generate catalog of used P-wave pairs and stations
-# - Use sparse QR decomposition if inversion matrix becomes too big
+# - Use sparse QR decomposition if inversion matrix becomes too big (qr([E; S])\y)
 
 # reference time
 global const tref = DateTime(2000, 1, 1, 0, 0, 0)
@@ -35,7 +35,7 @@ julia> t, τ, τerr, tpairs, ppairs = SOT.invert("nias", "H08S2..EDH", ["PSI"], 
 ```
 """
 function invert(eqname, tstations, pstations, invfreq, mincc; maxΔτt=Inf, excludetimes=[],
-               timescale=NaN)
+               timescale=NaN, csc=false)
 
   # number of frequencies at which to perform inversion
   l = length(invfreq)
@@ -143,7 +143,11 @@ function invert(eqname, tstations, pstations, invfreq, mincc; maxΔτt=Inf, excl
   @printf("Number of unique events: %4d\n", m)
 
   # cycle skipping correction
-  tpairs.Δτ = correctcycleskipping(tpairs, ppairs, E, S, P)
+  if csc
+    tpairs.Δτ = correctcycleskipping(tpairs, ppairs, E, S, P)
+  else
+    tpairs.Δτ = tpairs.Δτc
+  end
 
   # get travel time anomalies
   y = [vcat(tpairs.Δτ'...); repeat(ppairs.Δτ, 1, l)]
@@ -205,7 +209,7 @@ function invmatrix(tpairs, ppairs; timescale=NaN)
   Xp = sparse([1:np; 1:np], [pidx1; pidx2], [-ones(np); ones(np)])
 
   # smoothing matrix
-  Δ = isnan(timescale) ? (tr[3:m] - tr[1:m-2])/2 : timescale*ones(m)
+  Δ = isnan(timescale) ? (tr[3:m] - tr[1:m-2])/2 : timescale*ones(m-2)
   S = spdiagm(m-2, m, 0 => Δ ./ (tr[2:m-1] - tr[1:m-2]),
               1 => -Δ.*(1 ./ (tr[2:m-1] - tr[1:m-2]) + 1 ./ (tr[3:m] - tr[2:m-1])),
               2 => Δ ./ (tr[3:m] - tr[2:m-1]))

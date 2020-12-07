@@ -45,7 +45,7 @@ end
 
 # invert for travel time anomalies τ
 t, τ, τerr, tpairs, ppairs = SOT.invert(eqname, tstations, pstations, invfreq, mincc;
-                                        maxΔτt, excludetimes)
+                                        maxΔτt, excludetimes, csc=true)
 
 # number of used T- and P-wave pairs
 nt = size(tpairs, 1)
