@@ -32,7 +32,7 @@ invfreq = [2.0, 4.0]
 mincc = [0.6, 0.4]
 
 # maximum allowable T-wave |Δτ| (discard outliers)
-maxΔτt = 20.
+maxΔτ = 20.
 
 # excluded time periods: before 2004-12-01 and period with clock error
 excludetimes = [[Date(2001, 1, 1) Date(2004, 12, 1)], [Date(2010, 1, 1) Date(2012, 1, 20)]]
@@ -44,12 +44,41 @@ for s in tstations
 end
 
 # invert for travel time anomalies τ
-t, τ, τerr, tpairs, ppairs = SOT.invert(eqname, tstations, pstations, invfreq, mincc;
-                                        maxΔτt, excludetimes, csc=true)
+tpairs, ppairs, t, E, S, P, D = SOT.invert(eqname, tstations, pstations, invfreq, mincc;
+                                           maxΔτ, excludetimes, csc=true)
 
 # number of used T- and P-wave pairs
 nt = size(tpairs, 1)
 np = size(ppairs, 1)
+
+# number of unique events
+m = length(t)
+
+# number of frequencies
+l = length(invfreq)
+
+# get travel time anomalies
+y = [vcat(tpairs.Δτ'...); repeat(ppairs.Δτ, 1, l)]
+x = P*(E'*y)
+τ = D*x
+
+# calculate error
+σ2 = 1/(nt+np-m-1)*sum((y - E*x).^2, dims=1)
+A = D*P*E'
+τerr = sqrt.(σ2.*diag(A*A'))
+
+# record inverted delays
+tpairs.Δτi = collect(eachrow(E[1:nt,:]*x))
+ppairs.Δτi = collect(eachrow(E[nt+1:nt+np,:]*x))
+
+# get travel time differences between frequencies
+δy = y[:,1] - y[:,2:l]
+δx = x[:,1] - x[:,2:l]
+δτ = D*δx
+
+# calculate error
+σ2 = 1/(nt+np-m-1)*sum((δy - E*δx).^2, dims=1)
+δτerr = sqrt.(σ2.*diag(A*A'))
 
 # plot measured vs. inverted T-wave delays (lowest freq.)
 fig, ax = subplots(1, 1)
@@ -57,7 +86,7 @@ ax.scatter([tpairs.Δτ[i,1] for i = 1:nt], [tpairs.Δτi[i,1] for i = 1:nt], s=
 ax.set_aspect(1)
 xl = ax.get_xlim()
 yl = ax.get_ylim()
-x = [-2maxΔτt, 2maxΔτt]
+x = [-2maxΔτ, 2maxΔτ]
 ax.plot(x, x, color="black", linewidth=.8)
 ax.plot(x, x .+ 1/invfreq[1], color="black", linewidth=.8, zorder=0)
 ax.plot(x, x .- 1/invfreq[1], color="black", linewidth=.8, zorder=0)
@@ -75,7 +104,7 @@ ax.scatter(ppairs.Δτ, [ppairs.Δτi[i][1] for i = 1:np], s=5)
 ax.set_aspect(1)
 xl = ax.get_xlim()
 yl = ax.get_ylim()
-x = [-2maxΔτt, 2maxΔτt]
+x = [-2maxΔτ, 2maxΔτ]
 ax.plot(x, x, color="black", linewidth=.8)
 ax.plot(x, x .+ 1/invfreq[1], color="black", linewidth=.8, zorder=0)
 ax.plot(x, x .- 1/invfreq[1], color="black", linewidth=.8, zorder=0)
@@ -96,13 +125,11 @@ for i = 1:length(invfreq)
   ax[1].fill_between(t, τ[:,i] - 2τerr[:,i], τ[:,i] + 2τerr[:,i], alpha=.25,
                      color=colors[i], linewidths=0)
   if i > 1
-    δτ = τ[:,1] - τ[:,i]
-    δτerr = sqrt.(τerr[:,1].^2 + τerr[:,i].^2)
-    ax[2].plot(t, δτ, color=colors[i], label=@sprintf("%3.1f Hz – %3.1f Hz", invfreq[1],
-                                                      invfreq[i]))
-    ax[2].scatter(t, δτ, s=5, color=colors[i])
-    ax[2].fill_between(t, δτ - 2δτerr, δτ + 2δτerr, alpha=.25, color=colors[i],
-                       linewidths=0)
+    ax[2].plot(t, δτ[:,i-1], color=colors[i], label=@sprintf("%3.1f Hz – %3.1f Hz",
+                                                             invfreq[1], invfreq[i]))
+    ax[2].scatter(t, δτ[:,i-1], s=5, color=colors[i])
+    ax[2].fill_between(t, δτ[:,i-1] - 2δτerr[:,i-1], δτ[:,i-1] + 2δτerr[:,i-1], alpha=.25,
+                       color=colors[i], linewidths=0)
   end
 end
 ax[1].invert_yaxis()

@@ -12,7 +12,31 @@ global const meanyear = 365.2425
     invert(eqname, tstations, pstations, invfreq, mincc; maxΔτ=Inf, excludetimes=[], timscale=NaN)
 
 Invert measurements of the travel time changes between events ``Δτ`` for travel time
-anomalies ``τ`` relative to an arbitrary but common reference.
+anomalies ``τ`` relative to an arbitrary but common reference. Returns lists of the used
+*T*- and *P*-wave pairs, the unique events `t`, the design matrix `E`, the smoothing matrix
+`S`, the pseudoinverse `P = pinv(E'*E + S'*S)`, and the difference matrix `D` that take the
+difference between *T*- and *P*-wave anomalies. From these matrices, the travel time anomalies can be computed as
+```
+# number of unique events
+m = length(t)
+# data vector
+y = [vcat(tpairs.Δτ'...); repeat(ppairs.Δτ, 1, l)]
+# least-square solution
+x = P*(E'*y)
+# difference between T- and P-wave anomalies
+τ = D*x
+```
+The standard error of the solution can then be obtained using
+```
+# number of T- and P-wave pairs
+nt = size(tpairs, 1)
+np = size(ppairs, 1)
+# estimate variance
+σ2 = 1/(nt+np-m-1)*sum((y - E*x).^2, dims=1)
+# propagate error
+A = D*P*E'
+τerr = sqrt.(σ2.*diag(A*A'))
+```
 
 # Arguments
 - `eqname::String`: earthquake name to identify experiment.
@@ -24,17 +48,18 @@ anomalies ``τ`` relative to an arbitrary but common reference.
 - `excludetimes::Array{Array{Date,2},1}`: time periods to exclude from inversion.
 - `timescale::Float64=NaN`: time scale at which to apply smoothing; default is to use time
   scale set by the sampling rather than a fixed scale.
+- `csc::Bool=false: apply cycle-skipping corrections?
 
 # Examples
 ```
-julia> t, τ, τerr, tpairs, ppairs = SOT.invert("nias", "H08S2..EDH", ["PSI"], [2, 4], [0.6, 0.4])
+julia> tpairs, ppairs, t, E, S, P, D = SOT.invert("nias", ["H01W1..EDH", "H01W3..EDH"], ["PSI", "KUM", "WRAB"], [2.5, 4], [0.6, 0.4], maxΔτ=20)
 [...]
 
-julia> t, τ, τerr, tpairs, ppairs = SOT.invert("nias", "H08S2..EDH", ["PSI"], [2, 4], [0.6, 0.4]; excludetimes=[[Date(2001, 1, 1) Date(2004, 12, 1)], [Date(2010, 1, 1) Date(2012, 1, 20)]])
+julia> tpairs, ppairs, t, E, S, P, D = SOT.invert("nias", ["H08S2..EDH"], ["PSI"], [2, 4], [0.6, 0.4]; excludetimes=[[Date(2001, 1, 1) Date(2004, 12, 1)], [Date(2010, 1, 1) Date(2012, 1, 20)]], csc=true)
 [...]
 ```
 """
-function invert(eqname, tstations, pstations, invfreq, mincc; maxΔτt=Inf, excludetimes=[],
+function invert(eqname, tstations, pstations, invfreq, mincc; maxΔτ=Inf, excludetimes=[],
                timescale=NaN, csc=false)
 
   # number of frequencies at which to perform inversion
@@ -88,7 +113,7 @@ function invert(eqname, tstations, pstations, invfreq, mincc; maxΔτt=Inf, excl
         ccc = read(fid, "ccc")[idx]
 
         # check if criteria are met
-        if all(ccc .> mincc) && all(abs.(Δτc) .< maxΔτt)
+        if all(ccc .> mincc) && all(abs.(Δτc) .< maxΔτ)
 
           # record measurements
           push!(tpairs, [s, pair.event1, pair.event2, read(fid, "lagl")[idx], Δτc,
@@ -129,7 +154,7 @@ function invert(eqname, tstations, pstations, invfreq, mincc; maxΔτt=Inf, excl
   end
 
   # perform inversion
-  t, E, S, P = invmatrix(tpairs, ppairs; timescale)
+  t, E, S, P, D = invmatrix(tpairs, ppairs; timescale)
 
   # number of good T- and P-wave pairs
   nt = size(tpairs, 1)
@@ -149,39 +174,21 @@ function invert(eqname, tstations, pstations, invfreq, mincc; maxΔτt=Inf, excl
     tpairs.Δτ = tpairs.Δτc
   end
 
-  # get travel time anomalies
-  y = [vcat(tpairs.Δτ'...); repeat(ppairs.Δτ, 1, l)]
-  x = P*(E'*y)
-  τ = x[1:m,:] - x[m+1:2m,:]
-
-  # calculate error
-  if nt + np > m + 1
-    H = diag(P)
-    se = 1/(nt+np-m-1)*sum((y - E*x).^2, dims=1)
-    xerr = sqrt.(se.*H)
-    τerr = sqrt.(xerr[1:m,:].^2 + xerr[m+1:2m,:].^2)
-  else
-    τerr = Inf
-  end
-
-  # record inverted delays
-  tpairs.Δτi = collect(eachrow(E[1:nt,:]*x))
-  ppairs.Δτi = collect(eachrow(E[nt+1:nt+np,:]*x))
-
   # return inversion results, used pairs
-  return t, τ, τerr, tpairs, ppairs
+  return tpairs, ppairs, t, E, S, P, D
 
 end
 
 """
-    invmatrix(t1t, t2t, t1p, t2p; timescale=NaN)
+    invmatrix(tpairs, ppairs; timescale=NaN)
 
-Construct inversion matrix for T-wave pairs (`t1t`, `t2t`) and P-wave pairs (`t1p`, `t2p`).
-Returns common times `t`, the design matrix `E`, the smoothing matrix `S`, and the
-pseudoinverse `P = pinv(E'*E + S'*S)`. The inversion can then be performed with
-`P*E'*[Δτt; Δτp]`. (See Wunsch: Discrete Inverse and State Estimation Problems, p. 56.) If
-`timescale` is set (in days), smoothing is applied at that scale. By default
-(`timescale=NaN`), smoothing is applied at the sampling scale.
+Construct inversion matrix for *T*-wave pairs (`tpairs.event1`, `tpairs.event2`) and P-wave
+pairs (`ppairs.event1`, `ppairs.event2`). Returns the common times `t`, the design matrix
+`E`, the smoothing matrix `S`, the pseudoinverse `P = pinv(E'*E + S'*S)`, and the difference
+matrix `D`. The inversion can then be performed with `x = P*E'*[Δτt; Δτp]` and the travel
+time anomalies calculated with `τ = D*x`. (See Wunsch: Discrete Inverse and State Estimation
+Problems, p. 56.) If `timescale` is set (in days), smoothing is applied at that scale. By
+default (`timescale=NaN`), smoothing is applied at the sampling scale.
 """
 function invmatrix(tpairs, ppairs; timescale=NaN)
 
@@ -223,16 +230,19 @@ function invmatrix(tpairs, ppairs; timescale=NaN)
   # calculate pseudoinverse
   P = pinv(Array(E'*E + S'*S))
 
-  return t, E, S, P
+  # difference matrix to get τ from T- and P-wave anomalies
+  D = [spdiagm(0 => ones(m)) spdiagm(0 => -ones(m))]
+
+  return t, E, S, P, D
 
 end
 
 """
-    correctcycleskipping(Δτtl, Δτtc, Δτtr, ccl, ccc, ccr, Δτp, A, Ap)
+    correctcycleskipping(tpairs, ppairs, E, S, P)
 
 Find cycle-skipping corrections. Applies corrections to adjacent maxima of the
 cross-correlation function whenever they reduce the cost function. Returns the corrected
-T-wave delays ``Δτt``.
+*T*-wave delays `Δτ`.
 """
 function correctcycleskipping(tpairs, ppairs, E, S, P)
   
