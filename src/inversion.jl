@@ -1,5 +1,4 @@
 # TODO:
-# - Generate catalog of used P-wave pairs and stations
 # - Use sparse QR decomposition if inversion matrix becomes too big (qr([E; S])\y)
 
 # reference time
@@ -9,58 +8,25 @@ global const tref = DateTime(2000, 1, 1, 0, 0, 0)
 global const meanyear = 365.2425
 
 """
-    invert(eqname, tstations, pstations, invfreq, mincc; maxΔτ=Inf, excludetimes=[], timscale=NaN)
+    collectpairs(eqname, tstations, pstations, invfreq, mincc; maxΔτ=Inf, excludetimes=[])
 
-Invert measurements of the travel time changes between events ``Δτ`` for travel time
-anomalies ``τ`` relative to an arbitrary but common reference. Returns lists of the used
-*T*- and *P*-wave pairs, the unique events `t`, the design matrix `E`, the smoothing matrix
-`S`, the pseudoinverse `P = pinv(E'*E + S'*S)`, and the difference matrix `D` that take the
-difference between *T*- and *P*-wave anomalies. From these matrices, the travel time anomalies can be computed as
-```
-# number of unique events
-m = length(t)
-# data vector
-y = [vcat(tpairs.Δτ'...); repeat(ppairs.Δτ, 1, l)]
-# least-square solution
-x = P*(E'*y)
-# difference between T- and P-wave anomalies
-τ = D*x
-```
-The standard error of the solution can then be obtained using
-```
-# number of T- and P-wave pairs
-nt = size(tpairs, 1)
-np = size(ppairs, 1)
-# estimate variance
-σ2 = 1/(nt+np-m-1)*sum((y - E*x).^2, dims=1)
-# propagate error
-A = D*P*E'
-τerr = sqrt.(σ2.*diag(A*A'))
-```
-
-# Arguments
-- `eqname::String`: earthquake name to identify experiment.
-- `tstations::String`: list of *T*-wave station designations.
-- `pstations::String`: list of *P*-wave station designations.
-- `invfreq::Array{Float64,1}`: frequencies at which to perform inversion.
-- `mincc::Array{Float64,1}`: minimum CC requirement at the difference `invfreq`.
-- `maxΔτ::Float64=Inf`: maximum allowable T-wave ``Δτ``; larger measurements are discarded.
-- `excludetimes::Array{Array{Date,2},1}`: time periods to exclude from inversion.
-- `timescale::Float64=NaN`: time scale at which to apply smoothing; default is to use time
-  scale set by the sampling rather than a fixed scale.
-- `csc::Bool=false: apply cycle-skipping corrections?
+Collect all *T*- and *P*-wave pairs from the specified `tstations` and `pstations` that meet
+certain criteria and record the measurements at the frequencies specified by `invfreq`. The
+*T*-wave measurements are required to have a minimum cross-correlation coefficient of
+`mincc`. *T*-wave outliers can be excluded with `maxΔτ`, and time periods can be excluded
+with `excludetimes`.
 
 # Examples
 ```
-julia> tpairs, ppairs, t, E, S, P, D = SOT.invert("nias", ["H01W1..EDH", "H01W3..EDH"], ["PSI", "KUM", "WRAB"], [2.5, 4], [0.6, 0.4], maxΔτ=20)
+julia> tpairs, ppairs = SOT.collectpairs("nias", ["H01W1..EDH", "H01W3..EDH"], ["PSI", "KUM", "WRAB"], [2.5, 4], [0.6, 0.4], maxΔτ=20)
 [...]
 
-julia> tpairs, ppairs, t, E, S, P, D = SOT.invert("nias", ["H08S2..EDH"], ["PSI"], [2, 4], [0.6, 0.4]; excludetimes=[[Date(2001, 1, 1) Date(2004, 12, 1)], [Date(2010, 1, 1) Date(2012, 1, 20)]], csc=true)
+julia> tpairs, ppairs = SOT.collectpairs("nias", ["H08S2..EDH"], ["PSI"], [2, 4], [0.6, 0.4]; excludetimes=[[Date(2001, 1, 1) Date(2004, 12, 1)], [Date(2010, 1, 1) Date(2012, 1, 20)]])
 [...]
 ```
 """
-function invert(eqname, tstations, pstations, invfreq, mincc; maxΔτ=Inf, excludetimes=[],
-               timescale=NaN, csc=false)
+function collectpairs(eqname, tstations, pstations, invfreq, mincc;
+                      maxΔτ=Inf, excludetimes=[])
 
   # number of frequencies at which to perform inversion
   l = length(invfreq)
@@ -153,44 +119,46 @@ function invert(eqname, tstations, pstations, invfreq, mincc; maxΔτ=Inf, exclu
 
   end
 
-  # perform inversion
-  t, E, S, P, D = invmatrix(tpairs, ppairs; timescale)
-
-  # number of good T- and P-wave pairs
-  nt = size(tpairs, 1)
-  np = size(ppairs, 1)
-
-  # number of unique events
-  m = length(t)
-
-  @printf("Number of T-wave pairs:  %4d\n", nt)
-  @printf("Number of P-wave pairs:  %4d\n", np)
-  @printf("Number of unique events: %4d\n", m)
-
-  # cycle skipping correction
-  if csc
-    tpairs.Δτ = correctcycleskipping(tpairs, ppairs, E, S, P)
-  else
-    tpairs.Δτ = tpairs.Δτc
-  end
-
-  # return inversion results, used pairs
-  return tpairs, ppairs, t, E, S, P, D
+  # return pairs
+  return tpairs, ppairs
 
 end
 
 """
-    invmatrix(tpairs, ppairs; timescale=NaN)
+    invert(tpairs, ppairs; timescale=NaN)
 
-Construct inversion matrix for *T*-wave pairs (`tpairs.event1`, `tpairs.event2`) and P-wave
-pairs (`ppairs.event1`, `ppairs.event2`). Returns the common times `t`, the design matrix
-`E`, the smoothing matrix `S`, the pseudoinverse `P = pinv(E'*E + S'*S)`, and the difference
-matrix `D`. The inversion can then be performed with `x = P*E'*[Δτt; Δτp]` and the travel
-time anomalies calculated with `τ = D*x`. (See Wunsch: Discrete Inverse and State Estimation
-Problems, p. 56.) If `timescale` is set (in days), smoothing is applied at that scale. By
-default (`timescale=NaN`), smoothing is applied at the sampling scale.
+Set up inversion of the travel time changes between events ``Δτ`` for travel time anomalies
+``τ`` relative to an arbitrary but common reference. Returns the unique events `t`, the
+design matrix `E`, the smoothing matrix `S`, the pseudoinverse `P = pinv(E'*E + S'*S)`, and
+the difference matrix `D` that take the difference between *T*- and *P*-wave anomalies. If
+`timescale` is set (in days), smoothing is applied at that scale. By default
+(`timescale=NaN`), smoothing is applied at the sampling scale. (See Wunsch: Discrete Inverse
+and State Estimation Problems, p. 56.)
+
+From these matrices, the travel time anomalies can be computed as
+```
+# number of unique events
+m = length(t)
+# data vector
+y = [vcat(tpairs.Δτ'...); repeat(ppairs.Δτ, 1, l)]
+# least-square solution
+x = P*(E'*y)
+# difference between T- and P-wave anomalies
+τ = D*x
+```
+The standard error of the solution can then be obtained using
+```
+# number of T- and P-wave pairs
+nt = size(tpairs, 1)
+np = size(ppairs, 1)
+# estimate variance
+σ2 = 1/(nt+np-m-1)*sum((y - E*x).^2, dims=1)
+# propagate error
+A = D*P*E'
+τerr = sqrt.(σ2.*diag(A*A'))
+```
 """
-function invmatrix(tpairs, ppairs; timescale=NaN)
+function invert(tpairs, ppairs; timescale=NaN)
 
   # find unique events
   t = sort(unique([tpairs.event1; tpairs.event2]))

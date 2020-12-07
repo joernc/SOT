@@ -37,28 +37,35 @@ maxΔτ = 20.
 # excluded time periods: before 2004-12-01 and period with clock error
 excludetimes = [[Date(2001, 1, 1) Date(2004, 12, 1)]]
 
+# number of frequencies
+l = length(invfreq)
+
 # measure T-wave lags Δτ
 for s in tstations
   SOT.twavepick(eqname, s, pstations, starttime, endtime, frequencies, avgwidth, reffreq;
                 saveplot=true)
 end
 
-# invert for travel time anomalies τ
-tpairs, ppairs, t, E, S, P, D = SOT.invert(eqname, tstations, pstations, invfreq, mincc;
-                                           maxΔτ, excludetimes)
+# collect usable pairs
+tpairs, ppairs = SOT.collectpairs(eqname, tstations, pstations, invfreq, mincc;
+                                  maxΔτ, excludetimes)
 
-# number of used T- and P-wave pairs
+# perform inversion
+t, E, S, P, D = SOT.invert(tpairs, ppairs)
+
+# number of good T- and P-wave pairs
 nt = size(tpairs, 1)
 np = size(ppairs, 1)
 
 # number of unique events
 m = length(t)
 
-# number of frequencies
-l = length(invfreq)
+@printf("Number of T-wave pairs:  %4d\n", nt)
+@printf("Number of P-wave pairs:  %4d\n", np)
+@printf("Number of unique events: %4d\n", m)
 
 # get travel time anomalies
-y = [vcat(tpairs.Δτ'...); repeat(ppairs.Δτ, 1, l)]
+y = [vcat(tpairs.Δτc'...); repeat(ppairs.Δτ, 1, l)]
 x = P*(E'*y)
 τ = D*x
 
@@ -82,7 +89,7 @@ ppairs.Δτi = collect(eachrow(E[nt+1:nt+np,:]*x))
 
 # plot measured vs. inverted T-wave delays (lowest freq.)
 fig, ax = subplots(1, 1)
-ax.scatter([tpairs.Δτ[i,1] for i = 1:nt], [tpairs.Δτi[i,1] for i = 1:nt], s=5)
+ax.scatter([tpairs.Δτc[i,1] for i = 1:nt], [tpairs.Δτi[i,1] for i = 1:nt], s=5)
 ax.set_aspect(1)
 xl = ax.get_xlim()
 yl = ax.get_ylim()

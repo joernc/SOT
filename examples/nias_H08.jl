@@ -1,7 +1,7 @@
 # TODO:
 # - Understand large anomalies in 2017 — clock error?
 
-using .SOT, PyPlot, Printf, Dates
+using .SOT, PyPlot, Printf, Dates, LinearAlgebra
 
 # identifier for experiment
 eqname = "nias"
@@ -37,25 +37,35 @@ maxΔτ = 20.
 # excluded time periods: before 2004-12-01 and period with clock error
 excludetimes = [[Date(2001, 1, 1) Date(2004, 12, 1)], [Date(2010, 1, 1) Date(2012, 1, 20)]]
 
+# number of frequencies
+l = length(invfreq)
+
 # measure T-wave lags Δτ
 for s in tstations
   SOT.twavepick(eqname, s, pstations, starttime, endtime, frequencies, avgwidth, reffreq;
                 saveplot=true)
 end
 
-# invert for travel time anomalies τ
-tpairs, ppairs, t, E, S, P, D = SOT.invert(eqname, tstations, pstations, invfreq, mincc;
-                                           maxΔτ, excludetimes, csc=true)
+# collect usable pairs
+tpairs, ppairs = SOT.collectpairs(eqname, tstations, pstations, invfreq, mincc;
+                                  maxΔτ, excludetimes)
 
-# number of used T- and P-wave pairs
+# perform inversion
+t, E, S, P, D = SOT.invert(tpairs, ppairs)
+
+# number of good T- and P-wave pairs
 nt = size(tpairs, 1)
 np = size(ppairs, 1)
 
 # number of unique events
 m = length(t)
 
-# number of frequencies
-l = length(invfreq)
+@printf("Number of T-wave pairs:  %4d\n", nt)
+@printf("Number of P-wave pairs:  %4d\n", np)
+@printf("Number of unique events: %4d\n", m)
+
+# Apply cycle-skipping correction
+tpairs.Δτ = SOT.correctcycleskipping(tpairs, ppairs, E, S, P)
 
 # get travel time anomalies
 y = [vcat(tpairs.Δτ'...); repeat(ppairs.Δτ, 1, l)]
