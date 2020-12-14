@@ -283,7 +283,8 @@ function correctcycleskipping(tpairs, ppairs, E, S, P)
           J = Jp
           r = copy(rp)
           corrected = true
-          @printf("\r%4d %4d %d %7.5f\n", i, idx[i], j, 1e3J/(nt+np+m-2)/l)
+          @printf("\r%4d %4d %d %7.5f %s %s\n", i, idx[i], j, 1e3J/(nt+np+m-2)/l,
+                  tpairs.event1[idx[i]], tpairs.event2[idx[i]])
         else
           y[idx[i],:] = Δτa[idx[i],:,cs[idx[i]]]
         end

@@ -10,7 +10,7 @@ eqname = "nias"
 pstations = ["PSI", "KUM", "WRAB"]
 
 # T-wave station and channel
-tstations = ["H01W1..EDH", "H01W3..EDH"]
+tstations = ["H01W1..EDH", "H01W2..EDH", "H01W3..EDH"]
 
 # time window (seconds before and after predicted arrival time)
 starttime = 10
@@ -60,10 +60,6 @@ np = size(ppairs, 1)
 # number of unique events
 m = length(t)
 
-@printf("Number of T-wave pairs:  %4d\n", nt)
-@printf("Number of P-wave pairs:  %4d\n", np)
-@printf("Number of unique events: %4d\n", m)
-
 # get travel time anomalies
 y = [vcat(tpairs.Δτc'...); repeat(ppairs.Δτ, 1, l)]
 x = P*(E'*y)
@@ -89,16 +85,16 @@ ppairs.Δτi = collect(eachrow(E[nt+1:nt+np,:]*x))
 
 # plot measured vs. inverted T-wave delays (lowest freq.)
 fig, ax = subplots(1, 1)
-ax.scatter([tpairs.Δτc[i,1] for i = 1:nt], [tpairs.Δτi[i,1] for i = 1:nt], s=5)
+ax.scatter(y[1:nt,1], E[1:nt,:]*x[:,1], s=5)
 ax.set_aspect(1)
 xl = ax.get_xlim()
 yl = ax.get_ylim()
-x = [-2maxΔτ, 2maxΔτ]
-ax.plot(x, x, color="black", linewidth=.8)
-ax.plot(x, x .+ 1/invfreq[1], color="black", linewidth=.8, zorder=0)
-ax.plot(x, x .- 1/invfreq[1], color="black", linewidth=.8, zorder=0)
-ax.plot(x, x .+ 1/2invfreq[1], color="black", linewidth=.8, zorder=0)
-ax.plot(x, x .- 1/2invfreq[1], color="black", linewidth=.8, zorder=0)
+a = [-2maxΔτ, 2maxΔτ]
+ax.plot(a, a, color="black", linewidth=.8)
+ax.plot(a, a .+ 1/invfreq[1], color="black", linewidth=.8, zorder=0)
+ax.plot(a, a .- 1/invfreq[1], color="black", linewidth=.8, zorder=0)
+ax.plot(a, a .+ 1/2invfreq[1], color="black", linewidth=.8, zorder=0)
+ax.plot(a, a .- 1/2invfreq[1], color="black", linewidth=.8, zorder=0)
 ax.set_xlim(xl)
 ax.set_ylim(yl)
 ax.set_title("T waves")
@@ -107,16 +103,16 @@ ax.set_ylabel("inverted delay (s)")
 
 # plot measured vs. inverted P-wave delays (lowest freq.)
 fig, ax = subplots(1, 1)
-ax.scatter(ppairs.Δτ, [ppairs.Δτi[i][1] for i = 1:np], s=5)
+ax.scatter(y[nt+1:nt+np], E[nt+1:nt+np,:]*x[:,1], s=5)
 ax.set_aspect(1)
 xl = ax.get_xlim()
 yl = ax.get_ylim()
-x = [-2maxΔτ, 2maxΔτ]
-ax.plot(x, x, color="black", linewidth=.8)
-ax.plot(x, x .+ 1/invfreq[1], color="black", linewidth=.8, zorder=0)
-ax.plot(x, x .- 1/invfreq[1], color="black", linewidth=.8, zorder=0)
-ax.plot(x, x .+ 1/2invfreq[1], color="black", linewidth=.8, zorder=0)
-ax.plot(x, x .- 1/2invfreq[1], color="black", linewidth=.8, zorder=0)
+a = [-2maxΔτ, 2maxΔτ]
+ax.plot(a, a, color="black", linewidth=.8)
+ax.plot(a, a .+ 1/invfreq[1], color="black", linewidth=.8, zorder=0)
+ax.plot(a, a .- 1/invfreq[1], color="black", linewidth=.8, zorder=0)
+ax.plot(a, a .+ 1/2invfreq[1], color="black", linewidth=.8, zorder=0)
+ax.plot(a, a .- 1/2invfreq[1], color="black", linewidth=.8, zorder=0)
 ax.set_xlim(xl)
 ax.set_ylim(yl)
 ax.set_title("P waves")
