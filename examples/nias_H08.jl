@@ -83,7 +83,7 @@ ax.scatter(y[1:nt,1], E[1:nt,:]*x[:,1], s=5)
 ax.set_aspect(1)
 xl = ax.get_xlim()
 yl = ax.get_ylim()
-a = [-2maxΔτ, 2maxΔτ]
+a = [-20, 20]
 ax.plot(a, a, color="black", linewidth=.8)
 ax.plot(a, a .+ 1/tinvfreq[1], color="black", linewidth=.8, zorder=0)
 ax.plot(a, a .- 1/tinvfreq[1], color="black", linewidth=.8, zorder=0)
@@ -101,7 +101,7 @@ ax.scatter(y[nt+1:nt+np], E[nt+1:nt+np,:]*x[:,1], s=5)
 ax.set_aspect(1)
 xl = ax.get_xlim()
 yl = ax.get_ylim()
-a = [-2maxΔτ, 2maxΔτ]
+a = [-20, 20]
 ax.plot(a, a, color="black", linewidth=.8)
 ax.plot(a, a .+ 1/tinvfreq[1], color="black", linewidth=.8, zorder=0)
 ax.plot(a, a .- 1/tinvfreq[1], color="black", linewidth=.8, zorder=0)

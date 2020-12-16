@@ -98,8 +98,6 @@ arrival. The traces are filtered (prior to cutting) with a bandpass specified in
 """
 function cutpwaves(eqname, stations, interval, freqband)
 
-  # TODO: take starttime into account
-
   # load event catalog
   events = DataFrame(CSV.read(@sprintf("data/catalogs/%s.csv", eqname)))
 
