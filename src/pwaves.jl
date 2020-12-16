@@ -86,7 +86,6 @@ function downloadpwaves(eqname, stations; src="IRIS")
 
 end
 
-
 """
     cutpwaves(eqname, stations, interval, freqband)
 
@@ -180,7 +179,6 @@ function cutpwaves(eqname, stations, interval, freqband)
 
 end
 
-
 """
     findpairs(eqname, stations; saveplot=false)
 
@@ -205,106 +203,89 @@ function findpairs(eqname, stations; saveplot=false)
       mkpath(plotpath)
     end
 
+    # read traces, sampling rates, and start times from file
+    n = size(events, 1)
+    present = falses(n)
+    traces = Array{Float64,1}[]
+    fs = Float64[]
+    starttimes = Int[]
+    for i = 1:n
+      fmttime = Dates.format(events[i,:time], "yyyy-mm-ddTHH:MM:SS.ss")
+      filename = @sprintf("%s/%s.h5", datapath, fmttime)
+      if isfile(filename)
+        present[i] = true
+        push!(traces, h5read(filename, "trace"))
+        push!(fs, h5read(filename, "fs"))
+        push!(starttimes, h5read(filename, "starttime"))
+      end
+    end
+
+    # delete events without file
+    events = events[present,:]
+
     # initialize pair catalog
     pairs = DataFrame(event1=DateTime[], event2=DateTime[], Δτ=Float64[], cc=Float64[])
 
-    # loop over first events
-    for i in 1:size(events, 1) - 1
+    # loop over event pairs
+    for i = 1:size(events, 1) - 1, j = i+1:size(events, 1)
 
-      # formatted date and time of first event
-      fmttime1 = Dates.format(events[i,:time], "yyyy-mm-ddTHH:MM:SS.ss")
+      # lengths of waveforms
+      n1 = length(traces[i])
+      n2 = length(traces[j])
 
-      # filename of waveform from first event
-      file1 = @sprintf("%s/%s.h5", datapath, fmttime1)
+      # pad with zeros
+      padtrace1 = [traces[i]; zeros(n2)]
+      padtrace2 = [traces[j]; zeros(n1)]
 
-      # check if file exists
-      if isfile(file1)
+      # calculate cross-correlation function
+      norm = sqrt(sum(traces[i].^2)*sum(traces[j].^2))
+      cc = irfft(conj.(rfft(padtrace1)).*rfft(padtrace2), n1+n2)/norm
 
-        # read waveform for first event
-        trace1 = h5read(file1, "trace")
+      # find index of max cross-correlation
+      maxidx = argmax(cc)
 
-        # loop over second events
-        for j in i+1:size(events, 1)
+      # calculate max CC using quadratic interpolation
+      maxcc = maxquad(cc[mod1.(maxidx-1:maxidx+1, n1+n2)])
 
-          # formatted date and time of second event
-          fmttime2 = Dates.format(events[j,:time], "yyyy-mm-ddTHH:MM:SS.ss")
+      # record if max CC is above threshold
+      if maxcc ≥ 0.9
 
-          # filename of waveform from second event
-          file2 = @sprintf("%s/%s.h5", datapath, fmttime2)
+        # formatted event times
+        fmttime1 = Dates.format(events[i,:time], "yyyy-mm-ddTHH:MM:SS.ss")
+        fmttime2 = Dates.format(events[j,:time], "yyyy-mm-ddTHH:MM:SS.ss")
 
-          # check if file exists
-          if isfile(file2)
+        # make sure sampling rate is identical, pair is not a self-repeater
+        if fs[i] == fs[j] && starttimes[j] - starttimes[i] > n1/fs[i]*1e6
 
-            # read waveform for second event
-            trace2 = h5read(file2, "trace")
+          # integer lags (depending on whether n1 + n2 is even or odd)
+          lags = iseven(n1+n2) ? (-(n1+n2)÷2 : (n1+n2)÷2-1) : (-(n1+n2)÷2 : (n1+n2)÷2)
 
-            # lengths of waveforms
-            n1 = length(trace1)
-            n2 = length(trace2)
+          # calculate lag from grid max CC
+          Δτ = mod(maxidx-1, lags)/fs[i]
 
-            # pad with zeros
-            padtrace1 = [trace1; zeros(n2)]
-            padtrace2 = [trace2; zeros(n1)]
+          # adjust using quadratic interpolation
+          Δτ += argmaxquad(cc[mod1.(maxidx-1:maxidx+1, n1+n2)], 1/fs[i])
 
-            # calculate cross-correlation function
-            norm = sqrt(sum(trace1.^2)*sum(trace2.^2))
-            cc = irfft(conj.(rfft(padtrace1)).*rfft(padtrace2), n1+n2)/norm
+          # adjust for starttime recorded in waveforms
+          Δτ += (starttimes[j] - starttimes[i])/1e6
+          Δτ -= (events[j,:time] - events[i,:time]).value/1e3
 
-            # find index of max cross-correlation
-            maxidx = argmax(cc)
+          @printf("%s %s %4.2f %+6.3f\n", fmttime1, fmttime2, maxcc, Δτ)
 
-            # calculate max CC using quadratic interpolation
-            maxcc = maxquad(cc[mod1.(maxidx-1:maxidx+1, n1+n2)])
+          # record in catalog
+          push!(pairs, [events[i,:time], events[j,:time], Δτ, maxcc])
 
-            # record if mac CC is above threshold
-            if maxcc ≥ 0.9
-
-              # sampling interval
-              fs1 = h5read(file1, "fs")
-              fs2 = h5read(file2, "fs")
-
-              # read start times
-              starttime1 = h5read(file1, "starttime")
-              starttime2 = h5read(file2, "starttime")
-
-              # make sure sampling intervals are identical, pair is not a self-repeater
-              if fs1 == fs2 && starttime2 - starttime1 > n1/fs1*1e6
-
-                # integer lags (depending on whether n1 + n2 is even or odd)
-                lags = iseven(n1+n2) ? (-(n1+n2)÷2 : (n1+n2)÷2-1) : (-(n1+n2)÷2 : (n1+n2)÷2)
-
-                # calculate lag from grid max CC
-                Δτ = mod(maxidx-1, lags)/fs1
-
-                # adjust using quadratic interpolation
-                Δτ += argmaxquad(cc[mod1.(maxidx-1:maxidx+1, n1+n2)], 1/fs1)
-
-                # adjust for starttime recorded in waveforms
-                Δτ += (starttime2 - starttime1)/1e6
-                Δτ -= (events[j,:time] - events[i,:time]).value/1e3
-
-                @printf("%s %s %4.2f %+6.3f\n", fmttime1, fmttime2, maxcc, Δτ)
-
-                # record in catalog
-                push!(pairs, [events[i,:time], events[j,:time], Δτ, maxcc])
-
-                # plot cross-correlation function if desired
-                if saveplot
-                  fig = figure()
-                  plot(lags/fs1 .+ (starttime2 - starttime1)/1e6
-                       .- (events[j,:time] - events[i,:time]).value/1e3,
-                       circshift(cc, (n1+n2)÷2))
-                  xlim(Δτ-5, Δτ+5)
-                  xlabel("lag (s)")
-                  ylabel("cross-correlation")
-                  savefig(@sprintf("%s/%s_%s.pdf", plotpath, fmttime1, fmttime2))
-                  close(fig)
-                end
-
-              end
-
-            end
-
+          # plot cross-correlation function if desired
+          if saveplot
+            fig = figure()
+            plot(lags/fs[i] .+ (starttimes[j] - starttimes[i])/1e6
+                 .- (events[j,:time] - events[i,:time]).value/1e3,
+                 circshift(cc, (n1+n2)÷2))
+            xlim(Δτ-5, Δτ+5)
+            xlabel("lag (s)")
+            ylabel("cross-correlation")
+            savefig(@sprintf("%s/%s_%s.pdf", plotpath, fmttime1, fmttime2))
+            close(fig)
           end
 
         end
@@ -316,6 +297,6 @@ function findpairs(eqname, stations; saveplot=false)
     # save catalog to file
     CSV.write(@sprintf("data/catalogs/%s_%s.csv", eqname, s), pairs)
 
-  end # station loop
+  end
 
 end
