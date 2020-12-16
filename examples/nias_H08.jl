@@ -1,5 +1,7 @@
 # TODO:
 # - cut T waveforms
+# - allow different processing parameters for different T-wave stations
+# - save T-wave data in folders specific to processing parameters
 
 using .SOT, PyPlot, Printf, Dates, LinearAlgebra
 
@@ -8,6 +10,12 @@ eqname = "nias"
 
 # P-wave (reference) stations
 pstations = ["PS.PSI..BHZ", "MY.KUM..BHZ", "II.WRAB.00.BHZ"]
+
+# intervals to which to cut P waveforms
+pintervals = [[-3, 47], [-3, 47], [-3, 47]]
+
+# frequency bands to which to filter P waveforms
+pfreqbands = [[1, 3], [1, 3], [1.5, 2.5]]
 
 # T-wave station and channel
 tstations = ["H08S2..EDH"]
@@ -24,10 +32,10 @@ excludetimes = [[Date(2001, 1, 1) Date(2004, 12, 1)],
 SOT.downloadpwaves(eqname, pstations)
 
 # cut and filter P waveforms
-SOT.cutpwaves(eqname, pstations, [-3, 47], [1, 3])
+SOT.cutpwaves(eqname, pstations, pintervals, pfreqbands)
 
 # find P-wave pairs
-SOT.findpairs(eqname, pstations, saveplot=true)
+SOT.findpairs(eqname, pstations, pintervals, pfreqbands, saveplot=true)
 
 # measure T-wave lags Δτ
 for s in tstations
