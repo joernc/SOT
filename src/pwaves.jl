@@ -195,19 +195,18 @@ function findpairs(eqname, stations; saveplot=false)
     # path to P-wave directory
     datapath = @sprintf("data/pwaves/%s_%s", eqname, s)
 
-    # path tp plot directory
+    # path to plot directory
     plotpath = @sprintf("data/pplots/%s_%s", eqname, s)
     if saveplot
       mkpath(plotpath)
     end
 
     # read traces, sampling rates, and start times from file
-    n = size(events, 1)
-    present = falses(n)
     traces = Array{Float64,1}[]
     fs = Float64[]
     starttimes = Int[]
-    for i = 1:n
+    present = falses(size(events, 1))
+    for i = 1 : size(events, 1)
       fmttime = Dates.format(events[i,:time], "yyyy-mm-ddTHH:MM:SS.ss")
       filename = @sprintf("%s/%s.h5", datapath, fmttime)
       if isfile(filename)
@@ -225,7 +224,7 @@ function findpairs(eqname, stations; saveplot=false)
     pairs = DataFrame(event1=DateTime[], event2=DateTime[], Δτ=Float64[], cc=Float64[])
 
     # loop over event pairs
-    for i = 1:size(events, 1) - 1, j = i+1:size(events, 1)
+    for i = 1 : size(events, 1) - 1, j = i + 1 : size(events, 1)
 
       # lengths of waveforms
       n1 = length(traces[i])
@@ -245,47 +244,41 @@ function findpairs(eqname, stations; saveplot=false)
       # calculate max CC using quadratic interpolation
       maxcc = maxquad(cc[mod1.(maxidx-1:maxidx+1, n1+n2)])
 
-      # record if max CC is above threshold
-      if maxcc ≥ 0.9
+      # record if CC is above 0.9, sampling rate is identical, and pairs is not a repeater
+      if maxcc ≥ 0.9 && fs[i] == fs[j] && starttimes[j] - starttimes[i] > n1/fs[i]*1e6
 
         # formatted event times
         fmttime1 = Dates.format(events[i,:time], "yyyy-mm-ddTHH:MM:SS.ss")
         fmttime2 = Dates.format(events[j,:time], "yyyy-mm-ddTHH:MM:SS.ss")
 
-        # make sure sampling rate is identical, pair is not a self-repeater
-        if fs[i] == fs[j] && starttimes[j] - starttimes[i] > n1/fs[i]*1e6
+        # integer lags (depending on whether n1 + n2 is even or odd)
+        lags = iseven(n1+n2) ? (-(n1+n2)÷2 : (n1+n2)÷2-1) : (-(n1+n2)÷2 : (n1+n2)÷2)
 
-          # integer lags (depending on whether n1 + n2 is even or odd)
-          lags = iseven(n1+n2) ? (-(n1+n2)÷2 : (n1+n2)÷2-1) : (-(n1+n2)÷2 : (n1+n2)÷2)
+        # calculate lag from grid max CC
+        Δτ = mod(maxidx-1, lags)/fs[i]
 
-          # calculate lag from grid max CC
-          Δτ = mod(maxidx-1, lags)/fs[i]
+        # adjust using quadratic interpolation
+        Δτ += argmaxquad(cc[mod1.(maxidx-1:maxidx+1, n1+n2)], 1/fs[i])
 
-          # adjust using quadratic interpolation
-          Δτ += argmaxquad(cc[mod1.(maxidx-1:maxidx+1, n1+n2)], 1/fs[i])
+        # adjust for starttime recorded in waveforms
+        originadjustment = starttimes[j] - starttimes[i] - 10^3*(events[j,:time]
+                                                                 - events[i,:time]).value
+        Δτ += originadjustment/1e6
 
-          # adjust for starttime recorded in waveforms
-          Δτ += (starttimes[j] - starttimes[i])/1e6
-          Δτ -= (events[j,:time] - events[i,:time]).value/1e3
+        @printf("%s %s %4.2f %+6.3f\n", fmttime1, fmttime2, maxcc, Δτ)
 
-          @printf("%s %s %4.2f %+6.3f\n", fmttime1, fmttime2, maxcc, Δτ)
+        # record in catalog
+        push!(pairs, [events[i,:time], events[j,:time], Δτ, maxcc])
 
-          # record in catalog
-          push!(pairs, [events[i,:time], events[j,:time], Δτ, maxcc])
-
-          # plot cross-correlation function if desired
-          if saveplot
-            fig = figure()
-            plot(lags/fs[i] .+ (starttimes[j] - starttimes[i])/1e6
-                 .- (events[j,:time] - events[i,:time]).value/1e3,
-                 circshift(cc, (n1+n2)÷2))
-            xlim(Δτ-5, Δτ+5)
-            xlabel("lag (s)")
-            ylabel("cross-correlation")
-            savefig(@sprintf("%s/%s_%s.pdf", plotpath, fmttime1, fmttime2))
-            close(fig)
-          end
-
+        # plot cross-correlation function if desired
+        if saveplot
+          fig = figure()
+          plot(lags/fs[i] .+ originadjustment/1e6, circshift(cc, (n1+n2)÷2))
+          xlim(Δτ-5, Δτ+5)
+          xlabel("lag (s)")
+          ylabel("cross-correlation")
+          savefig(@sprintf("%s/%s_%s.pdf", plotpath, fmttime1, fmttime2))
+          close(fig)
         end
 
       end
