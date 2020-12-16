@@ -1,4 +1,5 @@
 # TODO:
+# - cut T waveforms
 
 using .SOT, PyPlot, Printf, Dates, LinearAlgebra
 
@@ -6,50 +7,36 @@ using .SOT, PyPlot, Printf, Dates, LinearAlgebra
 eqname = "nias"
 
 # P-wave (reference) stations
-pstations = ["PSI", "KUM", "WRAB"]
+pstations = ["PS.PSI..BHZ", "MY.KUM..BHZ", "II.WRAB.00.BHZ"]
 
 # T-wave station and channel
 tstations = ["H08S2..EDH"]
 
-# time window (seconds before and after predicted arrival time)
-starttime = 10
-endtime = 70
-
-# frequencies at which to measure travel time change
-frequencies = 0.1:0.1:10
-
-# frequency averaging width
-avgwidth = 0.5
-
-# reference frequency at which to pick max CC
-reffreq = 2.0
-
 # frequencies used in inversion
-invfreq = [2.0, 4.0]
-
-# minimum requirement for CC at the frequencies used for inversion
-mincc = [0.6, 0.4]
-
-# maximum allowable T-wave |Δτ| (discard outliers)
-maxΔτ = 20.
+tinvfreq = [2.0, 4.0]
 
 # excluded time periods: before 2004-12-01 and period with clock error
 excludetimes = [[Date(2001, 1, 1) Date(2004, 12, 1)],
                 [Date(2010, 1, 1) Date(2012, 1, 20)],
                 [Date(2017, 6, 1) Date(2018, 1, 1)]]
 
-# number of frequencies
-l = length(invfreq)
+# download P-wave data
+SOT.downloadpwaves(eqname, pstations)
+
+# cut and filter P waveforms
+SOT.cutpwaves(eqname, pstations, [-3, 47], [1, 3])
+
+# find P-wave pairs
+SOT.findpairs(eqname, pstations, saveplot=true)
 
 # measure T-wave lags Δτ
 for s in tstations
-  SOT.twavepick(eqname, s, pstations, starttime, endtime, frequencies, avgwidth, reffreq;
-                saveplot=true)
+  SOT.twavepick(eqname, s, pstations, [-10, 70], 0.1:0.1:10, 0.5, 2.0; saveplot=true)
 end
 
 # collect usable pairs
-tpairs, ppairs = SOT.collectpairs(eqname, tstations, pstations, invfreq, mincc;
-                                  maxΔτ, excludetimes)
+tpairs, ppairs = SOT.collectpairs(eqname, tstations, pstations, tinvfreq, [0.6, 0.4];
+                                  excludetimes)
 
 # perform inversion
 t, E, S, P, D = SOT.invert(tpairs, ppairs)
@@ -63,6 +50,9 @@ m = length(t)
 
 # Apply cycle-skipping correction
 tpairs.Δτ = SOT.correctcycleskipping(tpairs, ppairs, E, S, P)
+
+# number of frequencies
+l = length(tinvfreq)
 
 # get travel time anomalies
 y = [vcat(tpairs.Δτ'...); repeat(ppairs.Δτ, 1, l)]
@@ -95,10 +85,10 @@ xl = ax.get_xlim()
 yl = ax.get_ylim()
 a = [-2maxΔτ, 2maxΔτ]
 ax.plot(a, a, color="black", linewidth=.8)
-ax.plot(a, a .+ 1/invfreq[1], color="black", linewidth=.8, zorder=0)
-ax.plot(a, a .- 1/invfreq[1], color="black", linewidth=.8, zorder=0)
-ax.plot(a, a .+ 1/2invfreq[1], color="black", linewidth=.8, zorder=0)
-ax.plot(a, a .- 1/2invfreq[1], color="black", linewidth=.8, zorder=0)
+ax.plot(a, a .+ 1/tinvfreq[1], color="black", linewidth=.8, zorder=0)
+ax.plot(a, a .- 1/tinvfreq[1], color="black", linewidth=.8, zorder=0)
+ax.plot(a, a .+ 1/2tinvfreq[1], color="black", linewidth=.8, zorder=0)
+ax.plot(a, a .- 1/2tinvfreq[1], color="black", linewidth=.8, zorder=0)
 ax.set_xlim(xl)
 ax.set_ylim(yl)
 ax.set_title("T waves")
@@ -113,10 +103,10 @@ xl = ax.get_xlim()
 yl = ax.get_ylim()
 a = [-2maxΔτ, 2maxΔτ]
 ax.plot(a, a, color="black", linewidth=.8)
-ax.plot(a, a .+ 1/invfreq[1], color="black", linewidth=.8, zorder=0)
-ax.plot(a, a .- 1/invfreq[1], color="black", linewidth=.8, zorder=0)
-ax.plot(a, a .+ 1/2invfreq[1], color="black", linewidth=.8, zorder=0)
-ax.plot(a, a .- 1/2invfreq[1], color="black", linewidth=.8, zorder=0)
+ax.plot(a, a .+ 1/tinvfreq[1], color="black", linewidth=.8, zorder=0)
+ax.plot(a, a .- 1/tinvfreq[1], color="black", linewidth=.8, zorder=0)
+ax.plot(a, a .+ 1/2tinvfreq[1], color="black", linewidth=.8, zorder=0)
+ax.plot(a, a .- 1/2tinvfreq[1], color="black", linewidth=.8, zorder=0)
 ax.set_xlim(xl)
 ax.set_ylim(yl)
 ax.set_title("P waves")
@@ -126,14 +116,14 @@ ax.set_ylabel("inverted delay (s)")
 # plot timeseries
 colors = matplotlib.rcParams["axes.prop_cycle"].by_key()["color"]
 fig, ax = subplots(2, 1, figsize=(16, 6.4), sharex=true)
-for i = 1:length(invfreq)
-  ax[1].plot(t, τ[:,i], color=colors[i], label=@sprintf("%3.1f Hz", invfreq[i]))
+for i = 1:l
+  ax[1].plot(t, τ[:,i], color=colors[i], label=@sprintf("%3.1f Hz", tinvfreq[i]))
   ax[1].scatter(t, τ[:,i], s=5, c=colors[i])
   ax[1].fill_between(t, τ[:,i] - 2τerr[:,i], τ[:,i] + 2τerr[:,i], alpha=.25,
                      color=colors[i], linewidths=0)
   if i > 1
     ax[2].plot(t, δτ[:,i-1], color=colors[i], label=@sprintf("%3.1f Hz – %3.1f Hz",
-                                                             invfreq[1], invfreq[i]))
+                                                             tinvfreq[1], tinvfreq[i]))
     ax[2].scatter(t, δτ[:,i-1], s=5, color=colors[i])
     ax[2].fill_between(t, δτ[:,i-1] - 2δτerr[:,i-1], δτ[:,i-1] + 2δτerr[:,i-1], alpha=.25,
                        color=colors[i], linewidths=0)

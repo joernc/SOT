@@ -34,7 +34,7 @@ function collectpairs(eqname, tstations, pstations, invfreq, mincc;
   # load and combine catalogs of P-wave pairs
   catalog = Array{DataFrame,1}(undef, 0)
   for s in pstations
-    filename = @sprintf("catalogs/%s_%s.csv", eqname, s)
+    filename = @sprintf("data/catalogs/%s_%s.csv", eqname, s)
     push!(catalog, DataFrame(CSV.File(filename, select=[1, 2], comment="#")))
   end
   catalog = sort(unique(vcat(catalog...)))
@@ -59,7 +59,7 @@ function collectpairs(eqname, tstations, pstations, invfreq, mincc;
     for s in tstations
 
       # file with T-wave data
-      filename = @sprintf("twavedelays/%s_%s/%s_%s.h5", eqname, s,
+      filename = @sprintf("data/tdelays/%s_%s/%s_%s.h5", eqname, s,
                           pair.event1, pair.event2)
 
       # read data if present
@@ -105,7 +105,7 @@ function collectpairs(eqname, tstations, pstations, invfreq, mincc;
   for s in pstations
 
     # P-wave catalog
-    filename = @sprintf("catalogs/%s_%s.csv", eqname, s)
+    filename = @sprintf("data/catalogs/%s_%s.csv", eqname, s)
     pairs = DataFrame(CSV.File(filename, comment="#"))
 
     # find pairs that were selected based on T-wave measurements

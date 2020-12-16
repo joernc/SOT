@@ -8,7 +8,7 @@ global const earthradius = 6371e3
 global const soundspeed = 1.51e3
 
 """
-    twavepick(eqname, tstation, pstations, starttime, endtime, frequencies, avgwidth, reffreq; saveplot=false)
+    twavepick(eqname, tstation, pstations, interval, frequencies, avgwidth, reffreq; saveplot=false)
 
 Picks the lags at which the cross-correlation function between pairs is maximized, saving
 the results to file.
@@ -17,9 +17,8 @@ the results to file.
 - `eqname::String`: earthquake name to identify experiment.
 - `tstation::String`: *T*-wave station designation.
 - `pstations::String`: list of *P*-wave station designations.
-- `starttime::Float64`: beginning of time window in number of seconds before predicted
-  arrival time.
-- `endtime::Float64`: end of time window in number of seconds after predicted arrival time.
+- `interval::Array{Float64,1}`: beginning and end of waveform relative to predicted arrival
+  time.
 - `frequencies::Array{Float64,1}`: frequencies at which to measure.
 - `avgwidth::Float64`: width of Gaussian frequency window.
 - `reffreq::Float64`: reference frequency at which to find max cross correlation.
@@ -31,13 +30,13 @@ julia> twavepick("nias", "H08S2..EDH", ["PSI", "KUM", "WRAB"], 10, 70, 0.1:0.1:1
 [...]
 ```
 """
-function twavepick(eqname, tstation, pstations, starttime, endtime, frequencies, avgwidth,
-                   reffreq; saveplot=false)
+function twavepick(eqname, tstation, pstations, interval, frequencies, avgwidth, reffreq;
+                   saveplot=false)
 
   # load and combine catalogs of P-wave pairs
   catalog = Array{DataFrame,1}(undef, 0)
   for s in pstations
-    push!(catalog, DataFrame(CSV.File("catalogs/$(eqname)_$s.csv", select=[1, 2],
+    push!(catalog, DataFrame(CSV.File("data/catalogs/$(eqname)_$s.csv", select=[1, 2],
                                       comment="#")))
   end
   catalog = sort(unique(vcat(catalog...)))
@@ -48,16 +47,16 @@ function twavepick(eqname, tstation, pstations, starttime, endtime, frequencies,
     @printf("%d/%d: %s %s\n", i, size(catalog)[1], pair.event1, pair.event2)
 
     # paths to T waveforms
-    path1 = @sprintf("twaveforms/%s/%s", Dates.format(pair.event1, "yyyymmddHHMMSS"),
+    path1 = @sprintf("data/twaves/%s/%s", Dates.format(pair.event1, "yyyymmddHHMMSS"),
                      tstation)
-    path2 = @sprintf("twaveforms/%s/%s", Dates.format(pair.event2, "yyyymmddHHMMSS"),
+    path2 = @sprintf("data/twaves/%s/%s", Dates.format(pair.event2, "yyyymmddHHMMSS"),
                      tstation)
 
     # file to which measurements are saved
-    savepath = @sprintf("twavedelays/%s_%s", eqname, tstation)
+    savepath = @sprintf("data/tdelays/%s_%s", eqname, tstation)
     !isdir(savepath) && mkdir(savepath)
     filename = @sprintf("%s/%s_%s.h5", savepath, pair.event1, pair.event2)
-    figpath = @sprintf("twaveplots/%s_%s", eqname, tstation)
+    figpath = @sprintf("data/tplots/%s_%s", eqname, tstation)
     !isdir(figpath) && mkdir(figpath)
 
     # check whether all data is present
@@ -83,8 +82,8 @@ function twavepick(eqname, tstation, pstations, starttime, endtime, frequencies,
       time2 = trace2.b .+ (0:length(trace2.t)-1)/fs
 
       # define window
-      idx1 = arrivaltime - starttime .< time1 .< arrivaltime + endtime
-      idx2 = arrivaltime - starttime .< time2 .< arrivaltime + endtime
+      idx1 = arrivaltime + interval[1] .< time1 .< arrivaltime + interval[2]
+      idx2 = arrivaltime + interval[1] .< time2 .< arrivaltime + interval[2]
 
       # check whether data is present and has same length in both traces
       if any(idx1) && sum(idx1) == sum(idx2)

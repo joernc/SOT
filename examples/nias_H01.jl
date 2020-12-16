@@ -1,5 +1,6 @@
 # TODO:
 # - remove pairs that cause |Δτt| > 20
+# - update to process P waves
 
 using .SOT, PyPlot, Printf, Dates, LinearAlgebra
 
