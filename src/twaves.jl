@@ -123,7 +123,7 @@ function twavepick(eqname, tstations, tintervals, tavgwidth, treffreq, pstations
         n2 = Int(round((tintervals[i][2] - tintervals[i][1])/Δ2))
 
         # check whether time series are long enough and window has same length
-        if i1 + n1 - 1 ≤ N1 && i2 + n2 - 1 ≤ N2 && n1 == n2
+        if !isnothing(i1) && !isnothing(i2) && i1 + n1 - 1 ≤ N1 && i2 + n2 - 1 ≤ N2 && n1 == n2
 
           # sample length
           n = n1
@@ -201,14 +201,6 @@ function twavepick(eqname, tstations, tintervals, tavgwidth, treffreq, pstations
             write(fid, "ccr", ccr)
             write(fid, "ccl", ccl)
           end
-
-        else
-
-          println(time1[s1])
-          println(time2[s2])
-
-          println(time1[s1+n-1])
-          println(time2[s2+n-1])
 
         end
 
