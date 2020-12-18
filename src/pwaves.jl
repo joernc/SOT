@@ -86,21 +86,6 @@ function downloadpwaves(eqname, stations; src="IRIS")
 
 end
 
-"Time format"
-fmttime(time) = Dates.format(time, "yyyy-mm-ddTHH:MM:SS.ss")
-
-"Directory for raw P-wave data"
-pdatadir(eqname, station) = @sprintf("data/pdata/%s_%s", eqname, station)
-
-"Directory for processed P waveforms"
-pwavedir(eqname, station, interval, freqband) = @sprintf("data/pwaves/%s_%s_%+03d_%+03d_%3.1f_%3.1f", eqname, station, interval[1], interval[2], freqband[1], freqband[2])
-
-"Directory for P-wave cross-correlation plots"
-pplotdir(eqname, station, interval, freqband) = @sprintf("data/pplots/%s_%s_%+03d_%+03d_%3.1f_%3.1f", eqname, station, interval[1], interval[2], freqband[1], freqband[2])
-
-"File name for P-wave pair catalogs"
-paircatfile(eqname, station, interval, freqband) = @sprintf("data/catalogs/%s_%s_%+03d_%+03d_%3.1f_%3.1f", eqname, station, interval[1], interval[2], freqband[1], freqband[2])
-
 """
     cutpwaves(eqname, stations, intervals, freqbands)
 
@@ -176,6 +161,8 @@ function cutpwaves(eqname, stations, intervals, freqbands)
 
           # save to file
           h5open(wavefile, "w") do fid
+            fid["latitude"] = latitude
+            fid["longitude"] = longitude
             fid["starttime"] = cutstarttime
             fid["trace"] = cuttrace
             fid["fs"] = fs
@@ -202,7 +189,7 @@ cross-correlation functions should be saved.
 function findpairs(eqname, stations, intervals, freqbands; saveplot=false)
 
   # load event catalog
-  events = DataFrame(CSV.read(@sprintf("data/catalogs/%s.csv", eqname)))
+  allevents = DataFrame(CSV.read(@sprintf("data/catalogs/%s.csv", eqname)))
 
   # loop over stations
   for i = 1 : length(stations)
@@ -217,25 +204,31 @@ function findpairs(eqname, stations, intervals, freqbands; saveplot=false)
     end
 
     # read traces, sampling rates, and start times from file
-    traces = Array{Float64,1}[]
-    fs = Float64[]
+    latitudes = Float64[]
+    longitudes = Float64[]
     starttimes = Int[]
-    present = falses(size(events, 1))
-    for i = 1 : size(events, 1)
-      filename = @sprintf("%s/%s.h5", wavepath, fmttime(events[i,:time]))
+    fs = Float64[]
+    traces = Array{Float64,1}[]
+    present = falses(size(allevents, 1))
+    for i = 1 : size(allevents, 1)
+      filename = @sprintf("%s/%s.h5", wavepath, fmttime(allevents[i,:time]))
       if isfile(filename)
         present[i] = true
-        push!(traces, h5read(filename, "trace"))
-        push!(fs, h5read(filename, "fs"))
+        push!(latitudes, h5read(filename, "latitude"))
+        push!(longitudes, h5read(filename, "longitude"))
         push!(starttimes, h5read(filename, "starttime"))
+        push!(fs, h5read(filename, "fs"))
+        push!(traces, h5read(filename, "trace"))
       end
     end
 
     # delete events without file
-    events = events[present,:]
+    events = allevents[present,:]
 
     # initialize pair catalog
-    pairs = DataFrame(event1=DateTime[], event2=DateTime[], Δτ=Float64[], cc=Float64[])
+    pairs = DataFrame(event1=DateTime[], latitude1=Float64[], longitude1=Float64[],
+                      event2=DateTime[], latitude2=Float64[], longitude2=Float64[],
+                      Δτ=Float64[], cc=Float64[])
 
     # loop over event pairs
     for j = 1 : size(events, 1) - 1, k = j + 1 : size(events, 1)
@@ -279,7 +272,9 @@ function findpairs(eqname, stations, intervals, freqbands; saveplot=false)
                 fmttime(events[k,:time]), maxcc, Δτ)
 
         # record in catalog
-        push!(pairs, [events[j,:time], events[k,:time], Δτ, maxcc])
+        push!(pairs, [events[j,:time], events[j,:latitude], events[j,:longitude],
+                      events[k,:time], events[k,:latitude], events[k,:longitude],
+                      Δτ, maxcc])
 
         # plot cross-correlation function if desired
         if saveplot
@@ -303,3 +298,18 @@ function findpairs(eqname, stations, intervals, freqbands; saveplot=false)
   end
 
 end
+
+"Time format"
+fmttime(time) = Dates.format(time, "yyyy-mm-ddTHH:MM:SS.ss")
+
+"Directory for raw P-wave data"
+pdatadir(eqname, station) = @sprintf("data/pdata/%s_%s", eqname, station)
+
+"Directory for processed P waveforms"
+pwavedir(eqname, station, interval, freqband) = @sprintf("data/pwaves/%s_%s_%+03d_%+03d_%3.1f_%3.1f", eqname, station, interval[1], interval[2], freqband[1], freqband[2])
+
+"Directory for P-wave cross-correlation plots"
+pplotdir(eqname, station, interval, freqband) = @sprintf("data/pplots/%s_%s_%+03d_%+03d_%3.1f_%3.1f", eqname, station, interval[1], interval[2], freqband[1], freqband[2])
+
+"File name for P-wave pair catalogs"
+paircatfile(eqname, station, interval, freqband) = @sprintf("data/catalogs/%s_%s_%+03d_%+03d_%3.1f_%3.1f.csv", eqname, station, interval[1], interval[2], freqband[1], freqband[2])

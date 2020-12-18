@@ -1,9 +1,6 @@
 # TODO:
 # - Use sparse QR decomposition if inversion matrix becomes too big (qr([E; S])\y)
 
-# reference time
-global const tref = DateTime(2000, 1, 1, 0, 0, 0)
-
 # mean year in days
 global const meanyear = 365.2425
 
@@ -25,25 +22,25 @@ julia> tpairs, ppairs = SOT.collectpairs("nias", ["H08S2..EDH"], ["PSI"], [2, 4]
 [...]
 ```
 """
-function collectpairs(eqname, tstations, pstations, invfreq, mincc;
-                      maxΔτ=Inf, excludetimes=[])
+function collectpairs(eqname, tstations, tintervals, tavgwidth, treffreq, tinvfreq, tmincc,
+                      pstations, pintervals, pfreqbands; tmaxΔτ=Inf, excludetimes=[])
 
   # number of frequencies at which to perform inversion
-  l = length(invfreq)
+  l = length(tinvfreq)
 
   # load and combine catalogs of P-wave pairs
-  catalog = Array{DataFrame,1}(undef, 0)
-  for s in pstations
-    filename = @sprintf("data/catalogs/%s_%s.csv", eqname, s)
-    push!(catalog, DataFrame(CSV.File(filename, select=[1, 2], comment="#")))
+  ppairs = DataFrame[]
+  for i = 1 : size(pstations, 1)
+    filename = paircatfile(eqname, pstations[i], pintervals[i], pfreqbands[i])
+    push!(ppairs, DataFrame(CSV.File(filename, select=1:6, comment="#")))
   end
-  catalog = sort(unique(vcat(catalog...)))
+  ppairs = sort(unique(vcat(ppairs...)))
 
   # exclude events in specified time periods
-  for i = 1:length(excludetimes)
-    exclude1 = excludetimes[i][1] .< catalog[:event1] .< excludetimes[i][2]
-    exclude2 = excludetimes[i][1] .< catalog[:event2] .< excludetimes[i][2]
-    catalog = catalog[.!(exclude1 .| exclude2),:]
+  for i = 1 : length(excludetimes)
+    exclude1 = excludetimes[i][1] .< ppairs.event1 .< excludetimes[i][2]
+    exclude2 = excludetimes[i][1] .< ppairs.event2 .< excludetimes[i][2]
+    ppairs = ppairs[.!(exclude1 .| exclude2),:]
   end
 
   # list of all selected T-wave pairs
@@ -53,66 +50,65 @@ function collectpairs(eqname, tstations, pstations, invfreq, mincc;
                      ccc=Array{Float64,1}[], ccr=Array{Float64,1}[])
 
   # collect all T-wave pairs that meet the criteria
-  @showprogress for pair in eachrow(catalog)
+  @showprogress for i = 1 : length(tstations), j = 1 : size(ppairs, 1)
 
-    # loop over T-wave stations
-    for s in tstations
+    # file with T-wave data
+    tdelayfile = @sprintf("%s/%s_%s.h5",
+                          tdelaydir(eqname, tstations[i], tintervals[i], tavgwidth,
+                                    treffreq),
+                          fmttime(ppairs[j,:event1]), fmttime(ppairs[j,:event2]))
 
-      # file with T-wave data
-      filename = @sprintf("data/tdelays/%s_%s/%s_%s.h5", eqname, s,
-                          pair.event1, pair.event2)
+    # read data if present
+    if isfile(tdelayfile)
 
-      # read data if present
-      if isfile(filename)
+      # open file
+      fid = h5open(tdelayfile, "r")
 
-        # open file
-        fid = h5open(filename, "r")
+      # frequencies
+      tfreq = read(fid, "freq")
 
-        # frequencies
-        frequencies = read(fid, "freq")
+      # find frequency indices
+      idx = [argmin(abs.(tfreq .- tinvfreq[i])) for i = 1:l]
 
-        # find frequency indices
-        idx = [argmin(abs.(frequencies .- invfreq[i])) for i = 1:l]
+      # read central delay and CC
+      Δτc = read(fid, "Δτc")[idx]
+      ccc = read(fid, "ccc")[idx]
 
-        # read central delay and CC
-        Δτc = read(fid, "lagc")[idx]
-        ccc = read(fid, "ccc")[idx]
+      # check if criteria are met
+      if all(ccc .> tmincc) && all(abs.(Δτc) .< tmaxΔτ)
 
-        # check if criteria are met
-        if all(ccc .> mincc) && all(abs.(Δτc) .< maxΔτ)
-
-          # record measurements
-          push!(tpairs, [s, pair.event1, pair.event2, read(fid, "lagl")[idx], Δτc,
-                         read(fid, "lagr")[idx], read(fid, "ccl")[idx], ccc,
-                         read(fid, "ccr")[idx]])
-
-        end
-
-        # close file
-        close(fid)
+        # record measurements
+        push!(tpairs, [tstations[i], ppairs[j,:event1], ppairs[j,:event2],
+                       read(fid, "Δτl")[idx], Δτc, read(fid, "Δτr")[idx],
+                       read(fid, "ccl")[idx], ccc, read(fid, "ccr")[idx]])
 
       end
+
+      # close file
+      close(fid)
 
     end
 
   end
 
   # list of all selected P-wave pairs
-  ppairs = DataFrame(station=String[], event1=DateTime[], event2=DateTime[], Δτ=Float64[],
-                     cc=Float64[])
+  ppairs = DataFrame(station=String[],
+                     event1=DateTime[], latitude1=Float64[], longitude1=Float64[],
+                     event2=DateTime[], latitude2=Float64[], longitude2=Float64[],
+                     Δτ=Float64[], cc=Float64[])
 
   # find all pairs that were selected
-  for s in pstations
+  for i = 1 : length(pstations)
 
     # P-wave catalog
-    filename = @sprintf("data/catalogs/%s_%s.csv", eqname, s)
+    filename = paircatfile(eqname, pstations[i], pintervals[i], pfreqbands[i])
     pairs = DataFrame(CSV.File(filename, comment="#"))
 
     # find pairs that were selected based on T-wave measurements
     selpairs = innerjoin(pairs, select(tpairs, [:event1, :event2]), on=[:event1, :event2])
 
     # add station information
-    selpairs.station = s
+    selpairs.station = pstations[i]
 
     # record
     append!(ppairs, selpairs)
@@ -162,10 +158,8 @@ function invert(tpairs, ppairs; timescale=NaN)
 
   # find unique events
   t = sort(unique([tpairs.event1; tpairs.event2]))
-  tidx1 = indexin(tpairs.event1, t)
-  tidx2 = indexin(tpairs.event2, t)
-  pidx1 = indexin(ppairs.event1, t)
-  pidx2 = indexin(ppairs.event2, t)
+
+  # find positions in unique event list
 
   # number of T- and P-wave pairs
   nt = size(tpairs, 1)
@@ -174,20 +168,23 @@ function invert(tpairs, ppairs; timescale=NaN)
   # number of unique events
   m = length(t)
 
-  # time in days
-  tr = float.(Dates.value.(t .- tref))/1000/3600/24
-
   # T-wave pair matrix
+  tidx1 = indexin(tpairs.event1, t)
+  tidx2 = indexin(tpairs.event2, t)
   Xt = sparse([1:nt; 1:nt], [tidx1; tidx2], [-ones(nt); ones(nt)])
 
   # P-wave pair matrix
+  pidx1 = indexin(ppairs.event1, t)
+  pidx2 = indexin(ppairs.event2, t)
   Xp = sparse([1:np; 1:np], [pidx1; pidx2], [-ones(np); ones(np)])
 
   # smoothing matrix
+  tr = Dates.value.(t .- t[1])/1000/3600/24
   Δ = isnan(timescale) ? (tr[3:m] - tr[1:m-2])/2 : timescale*ones(m-2)
-  S = spdiagm(m-2, m, 0 => Δ ./ (tr[2:m-1] - tr[1:m-2]),
-              1 => -Δ.*(1 ./ (tr[2:m-1] - tr[1:m-2]) + 1 ./ (tr[3:m] - tr[2:m-1])),
-              2 => Δ ./ (tr[3:m] - tr[2:m-1]))
+  S = spdiagm(m-2, m,
+              0 => Δ.*(tr[2:m-1] - tr[1:m-2]).^-1,
+              1 => -Δ.*((tr[2:m-1] - tr[1:m-2]).^-1 + (tr[3:m] - tr[2:m-1]).^-1),
+              2 => Δ.*(tr[3:m] - tr[2:m-1]).^-1)
 
   # full design matrix
   E = [Xt spzeros(nt, m); spzeros(np, m) Xp]
@@ -324,7 +321,7 @@ function lineartrend(t, b; fitannual=false, fitsemiannual=false)
   m = length(t)
 
   # convert time to real numbers (in days)
-  tr = float.(Dates.value.(t .- tref))/1000/3600/24
+  tr = float.(Dates.value.(t .- t[1]))/1000/3600/24
 
   # annual frequency
   ω = 2π/meanyear

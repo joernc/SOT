@@ -1,8 +1,3 @@
-# TODO:
-# - cut T waveforms
-# - allow different processing parameters for different T-wave stations
-# - save T-wave data in folders specific to processing parameters
-
 using .SOT, PyPlot, Printf, Dates, LinearAlgebra
 
 # identifier for experiment
@@ -18,10 +13,21 @@ pintervals = [[-3, 47], [-3, 47], [-3, 47]]
 pfreqbands = [[1, 3], [1, 3], [1.5, 2.5]]
 
 # T-wave station and channel
-tstations = ["H08S2..EDH"]
+tstations = ["H08S2"]
+
+# T-wave time window around predicted arrival time
+tintervals = [[-10, 70]]
+
+# T-wave filtering window width
+tavgwidth = 0.5
+
+# T-wave reference frequency at which to find first max CC
+treffreq = 2.0
 
 # frequencies used in inversion
 tinvfreq = [2.0, 4.0]
+
+tmincc = [0.6, 0.4]
 
 # excluded time periods: before 2004-12-01 and period with clock error
 excludetimes = [[Date(2001, 1, 1) Date(2004, 12, 1)],
@@ -38,12 +44,12 @@ SOT.cutpwaves(eqname, pstations, pintervals, pfreqbands)
 SOT.findpairs(eqname, pstations, pintervals, pfreqbands, saveplot=true)
 
 # measure T-wave lags Δτ
-for s in tstations
-  SOT.twavepick(eqname, s, pstations, [-10, 70], 0.1:0.1:10, 0.5, 2.0; saveplot=true)
-end
+SOT.twavepick(eqname, tstations, tintervals, tavgwidth, treffreq, pstations, pintervals,
+              pfreqbands, saveplot=true)
 
 # collect usable pairs
-tpairs, ppairs = SOT.collectpairs(eqname, tstations, pstations, tinvfreq, [0.6, 0.4];
+tpairs, ppairs = SOT.collectpairs(eqname, tstations, tintervals, tavgwidth, treffreq,
+                                  tinvfreq, tmincc, pstations, pintervals, pfreqbands;
                                   excludetimes)
 
 # perform inversion
