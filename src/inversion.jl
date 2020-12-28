@@ -159,8 +159,6 @@ function invert(tpairs, ppairs; timescale=NaN)
   # find unique events
   t = sort(unique([tpairs.event1; tpairs.event2]))
 
-  # find positions in unique event list
-
   # number of T- and P-wave pairs
   nt = size(tpairs, 1)
   np = size(ppairs, 1)

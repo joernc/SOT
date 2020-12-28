@@ -295,8 +295,8 @@ function sweep!(maxlags, ccs, cc, freq, lags, i0, imax, fs)
   # sweep up
   for i = i0+1:m
 
-    # search region: ± half a period
-    idx = mod1.(imax .+ (-Int(round(fs/2freq[i])) : Int(round(fs/2freq[i]))), n)
+    # search region: ± a quarter period
+    idx = mod1.(imax .+ (-Int(round(fs/4freq[i])) : Int(round(fs/4freq[i]))), n)
 
     # maximum on grid
     imax = idx[argmax(cc[idx,i])]
@@ -313,8 +313,8 @@ function sweep!(maxlags, ccs, cc, freq, lags, i0, imax, fs)
   # sweep down
   for i = i0-1:-1:1
 
-    # search region: ± half a period
-    idx = mod1.(imax .+ (-Int(round(fs/2freq[i])) : Int(round(fs/2freq[i]))), n)
+    # search region: ± a quarter period
+    idx = mod1.(imax .+ (-Int(round(fs/4freq[i])) : Int(round(fs/4freq[i]))), n)
 
     # maximum on grid
     imax = idx[argmax(cc[idx,i])]
