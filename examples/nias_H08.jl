@@ -25,10 +25,10 @@ tavgwidth = 0.5
 treffreq = 2.0
 
 # frequencies used in inversion
-tinvfreq = [2.0, 4.0]
+tinvfreq = [2.0, 3.0, 4.0]
 
 # minimum CCs for T-wave pairs (at inversion frequencies)
-tmincc = [0.6, 0.4]
+tmincc = [0.6, 0.5, 0.4]
 
 # excluded time periods: before 2004-08-01 and period with clock error
 excludetimes = [[Date(2001, 1, 1) Date(2004, 8, 1)],
@@ -67,14 +67,10 @@ m = length(t)
 l = length(tinvfreq)
 
 # invert for P-wave delays without smoothing
-Δτp = E[1:nt,1:m]*(E[nt+1:nt+np,m+1:2m]\y[nt+1:nt+np,:])
+Δτp = E[1:nt,1:m]*(E[nt+1:nt+np,m+1:2m]\ppairs.Δτ)
 
-# manual cycle-skipping correction
-tpairs.Δτ = tpairs.Δτc
-idx = vcat(tpairs.Δτc'...)[:,1] - Δτp[:,1] .> .65
-tpairs.Δτ[idx] = tpairs.Δτl[idx]
-idx = vcat(tpairs.Δτc'...)[:,1] - Δτp[:,1] .< -.65
-tpairs.Δτ[idx] = tpairs.Δτr[idx]
+# make cycle-skipping correction
+tpairs.Δτ = SOT.correctcycleskipping(tpairs, ppairs, E, S, P)
 
 # get travel time anomalies
 y = [vcat(tpairs.Δτ'...); repeat(ppairs.Δτ, 1, l)]
@@ -87,8 +83,8 @@ A = D*P*E'
 τerr = sqrt.(σ2.*diag(A*A'))
 
 # get travel time differences between frequencies
-δy = y[:,1] - y[:,2:l]
-δx = x[:,1] - x[:,2:l]
+δy = y[:,1] .- y[:,2:l]
+δx = x[:,1] .- x[:,2:l]
 δτ = D*δx
 
 # calculate error
@@ -141,13 +137,17 @@ ax.set_ylabel("inverted delay (s)")
 colors = matplotlib.rcParams["axes.prop_cycle"].by_key()["color"]
 fig, ax = subplots(2, 1, figsize=(16, 6.4), sharex=true)
 for i = 1:l
-  ax[1].plot(t, τecco[:,i], color="gray", zorder=0)
+  if i ≤ 2
+    ax[1].plot(t, τecco[:,i], color="gray", zorder=0)
+  end
   ax[1].plot(t, τ[:,i], color=colors[i], label=@sprintf("%3.1f Hz", tinvfreq[i]))
   ax[1].scatter(t, τ[:,i], s=5, c=colors[i])
   ax[1].fill_between(t, τ[:,i] - 2τerr[:,i], τ[:,i] + 2τerr[:,i], alpha=.25,
                      color=colors[i], linewidths=0)
   if i > 1
-    ax[2].plot(t, τecco[:,1] - τecco[:,i], color="gray", zorder=0)
+    if i ≤ 2
+      ax[2].plot(t, τecco[:,1] - τecco[:,i], color="gray", zorder=0)
+    end
     ax[2].plot(t, δτ[:,i-1], color=colors[i], label=@sprintf("%3.1f Hz – %3.1f Hz",
                                                              tinvfreq[1], tinvfreq[i]))
     ax[2].scatter(t, δτ[:,i-1], s=5, color=colors[i])

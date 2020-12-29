@@ -227,15 +227,43 @@ function correctcycleskipping(tpairs, ppairs, E, S, P)
   Δτa = cat(vcat(tpairs.Δτl'...), vcat(tpairs.Δτc'...), vcat(tpairs.Δτr'...), dims=3)
   cca = cat(vcat(tpairs.ccl'...), vcat(tpairs.ccc'...), vcat(tpairs.ccr'...), dims=3)
 
-  # data vector using central measurements
-  y = [vcat(tpairs.Δτc'...); repeat(ppairs.Δτ, 1, l)]
+  # invert for P-wave delays without smoothing
+  Δτp = E[1:nt,1:m]*(E[nt+1:nt+np,m+1:2m]\ppairs.Δτ)
+
+  # use Gaussian mixture model with three members and shared covariance to find three
+  # clusters of pairs, estimate parameters using an EM algorithm, perform initial cycle-
+  # skipping correction by shifting left cluster to right and right cluster to left
+  x1 = [tpairs.Δτc[i][1] - Δτp[i,1] for i = 1:nt]
+  x2 = [tpairs.Δτc[i][1] - tpairs.Δτc[i][l] for i = 1:nt]
+  x = [x1 x2]
+  μ = [1 0.1; 0 0; -1 -0.1]
+  Σ = [0.2^2 0; 0 0.1^2]
+  τ = [0.05, 0.9, 0.05]
+  f(x, μ, Σ) = 1/sqrt((2π)^length(μ)*norm(Σ))*exp(-1/2*(x-μ)'*(Σ\(x-μ)))
+  T = nothing
+  for n = 1:100
+    T = [τ[j].*f(x[i,:], μ[j,:], Σ) for j=1:3, i=1:nt]
+    T ./= sum(T; dims=1)
+    τ = sum(T; dims=2)/nt
+    μ = sum([T[j,i]*x[i,k] for j=1:3, k=1:2, i=1:nt]; dims=3)[:,:,1]./sum(T; dims=2)
+    Σ = sum([T[j,i]*(x[i,:]-μ[j,:])*(x[i,:]-μ[j,:])' for i = 1:nt, j = 1:3])/nt
+  end
+  cs = [argmax(T[:,i]) for i = 1:nt]
+
+  # plot clusters used for initial correction
+  fig, ax = subplots()
+  for i = 1:3
+    ax.scatter(x[cs.==i,1], x[cs.==i,2], s=5)
+  end
+  ax.set_xlabel("low-frequency delay (s)")
+  ax.set_ylabel("differential delay (s)")
+
+  # data vector using initial correction
+  y = [[Δτa[i,j,cs[i]] for i = 1:nt, j = 1:l]; repeat(ppairs.Δτ, 1, l)]
 
   # initial residuals and cost
   r = sum((y - H*y).^2, dims=2)[:,1]
   J = .5sum(r) + .5sum((K*y).^2)
-
-  # index used (start with central)
-  cs = 2ones(Int, nt)
 
   # cycle through T-wave pairs until no further corrections are made
   i = 1
@@ -262,8 +290,8 @@ function correctcycleskipping(tpairs, ppairs, E, S, P)
     # go through trials
     for j = dir
 
-      # check if neighboring CCs are close to max CCs
-      if all(cca[idx[i],:,j] .≥ cca[idx[i],:,2] .- 0.15)
+      # check if probability of belonging to different cluster is at least 0.1%
+      if T[j,idx[i]] ≥ 0.001
 
         # swap out Δτ
         y[idx[i],:] = Δτa[idx[i],:,j]
@@ -297,6 +325,14 @@ function correctcycleskipping(tpairs, ppairs, E, S, P)
   @printf("Number of pairs corrected to left max.:  %4d\n", sum(cs.==1))
   @printf("Number of uncorrected pairs:             %4d\n", sum(cs.==2))
   @printf("Number of pairs corrected to right max.: %4d\n", sum(cs.==3))
+
+  # plot clusters used for initial correction
+  fig, ax = subplots()
+  for i = 1:3
+    ax.scatter(x[cs.==i,1], x[cs.==i,2], s=5)
+  end
+  ax.set_xlabel("low-frequency delay (s)")
+  ax.set_ylabel("differential delay (s)")
 
   # return optimal delays
   return collect(eachrow(y[1:nt,:]))
