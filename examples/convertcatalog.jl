@@ -1,7 +1,7 @@
 using CSV, DataFrames
 
 # load ISC catalog, select required columns
-iscdf = DataFrame(CSV.read("catalogs/ISC_nias.csv", header=26, delim=",",
+iscdf = DataFrame(CSV.File("catalogs/ISC_nias.csv", header=26, delim=",",
                            select=[1, 3, 4, 5, 6], normalizenames=true))
 
 # generate new DataFrame, convert data to desired format

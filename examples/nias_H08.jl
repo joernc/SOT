@@ -175,16 +175,16 @@ fig, ax = subplots(2, 1, figsize=(16, 6.4), sharex=true)
 ax[1].plot(t, τecco[:,2], color="tab:gray", zorder=0)
 ax[2].plot(t, τecco[:,1] - τecco[:,2], color="tab:gray", zorder=0)
 for i = 1:l
-  ax[1].plot(t, τ[:,i], color=colors[i], label=@sprintf("%3.1f Hz", tinvfreq[i]))
-  ax[1].scatter(t, τ[:,i], s=5, c=colors[i])
+  ax[1].plot(t, τ[:,i], color=colors[i], zorder=i, label=@sprintf("%3.1f Hz", tinvfreq[i]))
+  ax[1].scatter(t, τ[:,i], s=5, c=colors[i], zorder=i)
   ax[1].fill_between(t, τ[:,i] - 2τerr[:,i], τ[:,i] + 2τerr[:,i], alpha=.25,
-                     color=colors[i], linewidths=0)
+                     color=colors[i], linewidths=0, zorder=i)
   if i > 1
-    ax[2].plot(t, δτ[:,i-1], color=colors[i], label=@sprintf("%3.1f Hz – %3.1f Hz",
-                                                             tinvfreq[1], tinvfreq[i]))
-    ax[2].scatter(t, δτ[:,i-1], s=5, color=colors[i])
+    ax[2].plot(t, δτ[:,i-1], color=colors[i], zorder=i,
+               label=@sprintf("%3.1f Hz – %3.1f Hz", tinvfreq[1], tinvfreq[i]))
+    ax[2].scatter(t, δτ[:,i-1], s=5, color=colors[i], zorder=i)
     ax[2].fill_between(t, δτ[:,i-1] - 2δτerr[:,i-1], δτ[:,i-1] + 2δτerr[:,i-1], alpha=.25,
-                       color=colors[i], linewidths=0)
+                       color=colors[i], linewidths=0, zorder=i)
   end
 end
 ax[1].invert_yaxis()
