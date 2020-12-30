@@ -30,9 +30,9 @@ tinvfreq = [2.0, 3.0, 4.0]
 # minimum CCs for T-wave pairs (at inversion frequencies)
 tmincc = [0.6, 0.5, 0.4]
 
-# excluded time periods: before 2004-08-01 and period with clock error
+# excluded time periods: before 2004-08-01 and periods with uncorrected clock error
 excludetimes = [[Date(2001, 1, 1) Date(2004, 8, 1)],
-                [Date(2010, 1, 1) Date(2012, 1, 20)],
+                [DateTime("2010-03-16T00:00:00") DateTime("2010-05-17T02:06:17.760")],
                 [Date(2017, 6, 1) Date(2018, 1, 1)]]
 
 # download P-wave data
@@ -52,6 +52,42 @@ SOT.twavepick(eqname, tstations, tintervals, tavgwidth, treffreq, pstations, pin
 tpairs, ppairs = SOT.collectpairs(eqname, tstations, tintervals, tavgwidth, treffreq,
                                   tinvfreq, tmincc, pstations, pintervals, pfreqbands;
                                   excludetimes)
+
+# H08 clock error correction
+function timingcorrection!(tpairs, starttime, endtime, c)
+  idx1 = starttime .< tpairs.event1 .< endtime
+  idx2 = starttime .< tpairs.event2 .< endtime
+  for i = findall(idx1)
+    tpairs.Δτl[i] .-= c*((tpairs.event1[i] .- starttime)./(endtime - starttime))
+    tpairs.Δτc[i] .-= c*((tpairs.event1[i] .- starttime)./(endtime - starttime))
+    tpairs.Δτr[i] .-= c*((tpairs.event1[i] .- starttime)./(endtime - starttime))
+  end
+  for i = findall(idx2)
+    tpairs.Δτl[i] .+= c*((tpairs.event2[i] .- starttime)./(endtime - starttime))
+    tpairs.Δτc[i] .+= c*((tpairs.event2[i] .- starttime)./(endtime - starttime))
+    tpairs.Δτr[i] .+= c*((tpairs.event2[i] .- starttime)./(endtime - starttime))
+  end
+end
+
+# correct based on comparison with DGAR
+timingcorrection!(tpairs, DateTime("2010-01-23T08:13:52.666"),
+                  DateTime("2010-03-16T00:00:00"), 2.311)
+timingcorrection!(tpairs, DateTime("2010-05-17T02:06:17.760"),
+                  DateTime("2010-10-09T23:59:52.747"), 7.060)
+timingcorrection!(tpairs, DateTime("2010-10-09T23:59:52.747"),
+                  DateTime("2010-12-16T02:03:23.040"), 3.427)
+timingcorrection!(tpairs, DateTime("2010-12-16T02:03:23.040"),
+                  DateTime("2011-02-22T09:43:45.858"), 3.495)
+timingcorrection!(tpairs, DateTime("2011-02-22T09:43:45.858"),
+                  DateTime("2011-03-24T07:55:37.542"), 1.593)
+timingcorrection!(tpairs, DateTime("2011-03-24T07:55:37.542"),
+                  DateTime("2011-04-18T01:59:00.042"), 1.276)
+timingcorrection!(tpairs, DateTime("2011-04-18T01:59:00.042"),
+                  DateTime("2011-08-27T23:59:52.317"), 6.678)
+timingcorrection!(tpairs, DateTime("2011-08-27T23:59:52.317"),
+                  DateTime("2011-12-24T23:59:52.453"), 6.786)
+timingcorrection!(tpairs, DateTime("2011-12-24T23:59:52.453"),
+                  DateTime("2012-01-20T00:00:00.000"), 1.495)
 
 # perform inversion
 t, E, S, P, D = SOT.invert(tpairs, ppairs)
@@ -136,18 +172,14 @@ ax.set_ylabel("inverted delay (s)")
 # plot timeseries
 colors = matplotlib.rcParams["axes.prop_cycle"].by_key()["color"]
 fig, ax = subplots(2, 1, figsize=(16, 6.4), sharex=true)
+ax[1].plot(t, τecco[:,2], color="tab:gray", zorder=0)
+ax[2].plot(t, τecco[:,1] - τecco[:,2], color="tab:gray", zorder=0)
 for i = 1:l
-  if i ≤ 2
-    ax[1].plot(t, τecco[:,i], color="gray", zorder=0)
-  end
   ax[1].plot(t, τ[:,i], color=colors[i], label=@sprintf("%3.1f Hz", tinvfreq[i]))
   ax[1].scatter(t, τ[:,i], s=5, c=colors[i])
   ax[1].fill_between(t, τ[:,i] - 2τerr[:,i], τ[:,i] + 2τerr[:,i], alpha=.25,
                      color=colors[i], linewidths=0)
   if i > 1
-    if i ≤ 2
-      ax[2].plot(t, τecco[:,1] - τecco[:,i], color="gray", zorder=0)
-    end
     ax[2].plot(t, δτ[:,i-1], color=colors[i], label=@sprintf("%3.1f Hz – %3.1f Hz",
                                                              tinvfreq[1], tinvfreq[i]))
     ax[2].scatter(t, δτ[:,i-1], s=5, color=colors[i])
