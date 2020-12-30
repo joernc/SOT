@@ -15,7 +15,7 @@ channels) specified in `stations`. Currently, one full hour after the event is d
 function downloadpwaves(eqname, stations; src="IRIS")
 
   # load event catalog
-  events = DataFrame(CSV.read(@sprintf("data/catalogs/%s.csv", eqname)))
+  events = DataFrame(CSV.File(@sprintf("data/catalogs/%s.csv", eqname)))
 
   # loop over stations
   for s in stations
@@ -101,7 +101,7 @@ will filter data from the first station to 1 to 3 Hz and that from the second st
 function cutpwaves(eqname, stations, intervals, freqbands)
 
   # load event catalog
-  events = DataFrame(CSV.read(@sprintf("data/catalogs/%s.csv", eqname)))
+  events = DataFrame(CSV.File(@sprintf("data/catalogs/%s.csv", eqname)))
 
   for i in 1 : length(stations)
 
@@ -189,7 +189,7 @@ cross-correlation functions should be saved.
 function findpairs(eqname, stations, intervals, freqbands; saveplot=false)
 
   # load event catalog
-  allevents = DataFrame(CSV.read(@sprintf("data/catalogs/%s.csv", eqname)))
+  allevents = DataFrame(CSV.File(@sprintf("data/catalogs/%s.csv", eqname)))
 
   # loop over stations
   for i = 1 : length(stations)

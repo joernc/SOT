@@ -53,7 +53,7 @@ function twavepick(eqname, tstations, tintervals, tavgwidth, treffreq, pstations
   for i = 1 : length(tstations)
 
     # station location
-    stalat, stalon = CSV.read(tstationlocfile(tstations[i]))[1,:]
+    stalat, stalon = DataFrame(CSV.File(tstationlocfile(tstations[i])))[1,:]
 
     # iterate over pairs
     for j = 1 : size(pairs, 1)
