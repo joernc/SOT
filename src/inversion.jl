@@ -1,5 +1,5 @@
 # TODO:
-# - Use sparse QR decomposition if inversion matrix becomes too big (qr([E; S])\y)
+# - Use sparse QR decomposition if inversion matrix becomes too big (qr([E; S])\y)?
 
 # mean year in days
 global const meanyear = 365.2425
@@ -133,28 +133,37 @@ and State Estimation Problems, p. 56.)
 
 From these matrices, the travel time anomalies can be computed as
 ```
-# number of unique events
-m = length(t)
-# data vector
-y = [vcat(tpairs.Δτ'...); repeat(ppairs.Δτ, 1, l)]
-# least-square solution
-x = P*(E'*y)
-# difference between T- and P-wave anomalies
-τ = D*x
-```
-The standard error of the solution can then be obtained using
-```
 # number of T- and P-wave pairs
 nt = size(tpairs, 1)
 np = size(ppairs, 1)
-# estimate variance
-σ2 = 1/(nt+np-m-1)*sum((y - E*x).^2, dims=1)
+# number of unique events
+m = length(t)
+# number of frequencies
+l = length(tpairs.Δτc[1])
+# data vector
+y = [reshape(vcat(tpairs.Δτ'...), l*nt); ppairs.Δτ]
+# least-square solution
+x = P*(E'*y)
+# travel time anomalies as differences between T- and P-wave anomalies
+τ = reshape(D*x, (m, l))
+```
+The standard error of the solution can then be obtained using
+```
+# residuals
+n = y - E*x
+# estimate variances for T- and P-wave delays
+σt = sqrt(mean(n[1:l*nt].^2)*(l*nt+np)/(l*nt+np-l*m-1))
+σp = sqrt(mean(n[l*nt+1:l*nt+np].^2)*(l*nt+np)/(l*nt+np-l*m-1))
+R = spdiagm(0 => [σt^2*ones(l*nt); σp^2*ones(np)])
 # propagate error
-A = D*P*E'
-τerr = sqrt.(σ2.*diag(A*A'))
+A = P*E'
+τerr = reshape(sqrt.(diag(D*A*R*A'*D')), (m, l))
 ```
 """
 function invert(tpairs, ppairs; timescale=NaN)
+
+  # number of frequencies
+  l = length(tpairs.Δτc[1])
 
   # find unique events
   t = sort(unique([tpairs.event1; tpairs.event2]))
@@ -176,25 +185,25 @@ function invert(tpairs, ppairs; timescale=NaN)
   pidx2 = indexin(ppairs.event2, t)
   Xp = sparse([1:np; 1:np], [pidx1; pidx2], [-ones(np); ones(np)])
 
+  # full design matrix
+  E = blockdiag([Xt for i = 1:l]..., Xp)
+
   # smoothing matrix
   tr = Dates.value.(t .- t[1])/1000/3600/24
   Δ = isnan(timescale) ? (tr[3:m] - tr[1:m-2])/2 : timescale*ones(m-2)
-  S = spdiagm(m-2, m,
+  F = spdiagm(m-2, m,
               0 => Δ.*(tr[2:m-1] - tr[1:m-2]).^-1,
               1 => -Δ.*((tr[2:m-1] - tr[1:m-2]).^-1 + (tr[3:m] - tr[2:m-1]).^-1),
               2 => Δ.*(tr[3:m] - tr[2:m-1]).^-1)
 
-  # full design matrix
-  E = [Xt spzeros(nt, m); spzeros(np, m) Xp]
+  # difference matrix to get τ from T- and P-wave anomalies
+  D = [I(l*m) vcat([-I(m) for i = 1:l]...)]
 
   # full smoothing matrix
-  S = [S/2 -S/2]
+  S = blockdiag([F for i = 1:l]...)*D
 
   # calculate pseudoinverse
   P = pinv(Array(E'*E + S'*S))
-
-  # difference matrix to get τ from T- and P-wave anomalies
-  D = [spdiagm(0 => ones(m)) spdiagm(0 => -ones(m))]
 
   return t, E, S, P, D
 
@@ -213,22 +222,22 @@ function correctcycleskipping(tpairs, ppairs, E, S, P)
   H = E*P*E'
   K = S*P*E'
 
+  # number of frequencies
+  l = length(tpairs.Δτc[1])
+
   # number of unique events
-  m = size(E, 2)÷2
+  m = size(E, 2)÷(l+1)
 
   # number of T- and P-wave pairs
   nt = size(tpairs, 1)
   np = size(ppairs, 1)
-
-  # number of frequencies
-  l = length(tpairs.Δτc[1])
 
   # collect the three delays and CCs
   Δτa = cat(vcat(tpairs.Δτl'...), vcat(tpairs.Δτc'...), vcat(tpairs.Δτr'...), dims=3)
   cca = cat(vcat(tpairs.ccl'...), vcat(tpairs.ccc'...), vcat(tpairs.ccr'...), dims=3)
 
   # invert for P-wave delays without smoothing
-  Δτp = E[1:nt,1:m]*(E[nt+1:nt+np,m+1:2m]\ppairs.Δτ)
+  Δτp = E[1:nt,1:m]*(E[l*nt+1:l*nt+np,l*m+1:(l+1)*m]\ppairs.Δτ)
 
   # use Gaussian mixture model with three members and shared covariance to find three
   # clusters of pairs, estimate parameters using an EM algorithm, perform initial cycle-
@@ -251,18 +260,19 @@ function correctcycleskipping(tpairs, ppairs, E, S, P)
   cs = [argmax(T[:,i]) for i = 1:nt]
 
   # plot clusters used for initial correction
-  fig, ax = subplots()
+  fig, ax = subplots(1, 2, sharex=true, sharey=true, figsize=(190/25.4, 95/25.4))
   for i = 1:3
-    ax.scatter(x[cs.==i,1], x[cs.==i,2], s=5)
+    ax[1].scatter(x[cs.==i,1], x[cs.==i,2], s=5)
   end
-  ax.set_xlabel("low-frequency delay (s)")
-  ax.set_ylabel("differential delay (s)")
+  ax[1].set_xlabel("low-frequency delay (s)")
+  ax[1].set_ylabel("differential delay (s)")
+  ax[1].set_title("after clustering")
 
   # data vector using initial correction
-  y = [[Δτa[i,j,cs[i]] for i = 1:nt, j = 1:l]; repeat(ppairs.Δτ, 1, l)]
+  y = [reshape([Δτa[i,j,cs[i]] for i = 1:nt, j = 1:l], l*nt); ppairs.Δτ]
 
   # initial residuals and cost
-  r = sum((y - H*y).^2, dims=2)[:,1]
+  r = (y - H*y).^2
   J = .5sum(r) + .5sum((K*y).^2)
 
   # cycle through T-wave pairs until no further corrections are made
@@ -294,10 +304,10 @@ function correctcycleskipping(tpairs, ppairs, E, S, P)
       if T[j,idx[i]] ≥ 0.001
 
         # swap out Δτ
-        y[idx[i],:] = Δτa[idx[i],:,j]
+        y[idx[i].+(0:l-1)*nt] = Δτa[idx[i],:,j]
 
         # new residuals and cost
-        rp = sum((y - H*y).^2, dims=2)[:,1]
+        rp = (y - H*y).^2
         Jp = .5sum(rp) + .5sum((K*y).^2)
 
         # record if cost is reduced, revert otherwise
@@ -309,7 +319,7 @@ function correctcycleskipping(tpairs, ppairs, E, S, P)
           @printf("\r%4d %4d %d %7.5f %s %s\n", i, idx[i], j, 1e3J/(nt+np+m-2)/l,
                   tpairs.event1[idx[i]], tpairs.event2[idx[i]])
         else
-          y[idx[i],:] = Δτa[idx[i],:,cs[idx[i]]]
+          y[idx[i].+(0:l-1)*nt] = Δτa[idx[i],:,cs[idx[i]]]
         end
 
       end
@@ -327,15 +337,15 @@ function correctcycleskipping(tpairs, ppairs, E, S, P)
   @printf("Number of pairs corrected to right max.: %4d\n", sum(cs.==3))
 
   # plot clusters used for initial correction
-  fig, ax = subplots()
   for i = 1:3
-    ax.scatter(x[cs.==i,1], x[cs.==i,2], s=5)
+    ax[2].scatter(x[cs.==i,1], x[cs.==i,2], s=5)
   end
-  ax.set_xlabel("low-frequency delay (s)")
-  ax.set_ylabel("differential delay (s)")
+  ax[2].set_xlabel("low-frequency delay (s)")
+  ax[2].set_title("after additional corrections")
+  fig.tight_layout()
 
   # return optimal delays
-  return collect(eachrow(y[1:nt,:]))
+  return collect(eachrow(reshape(y[1:l*nt], (nt, l))))
 
 end
 

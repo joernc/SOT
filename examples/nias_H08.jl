@@ -1,4 +1,5 @@
-using .SOT, PyPlot, Printf, Dates, LinearAlgebra, HDF5, Interpolations
+using .SOT, PyPlot, Printf, Dates, LinearAlgebra, Statistics, SparseArrays
+using HDF5, Interpolations
 
 # identifier for experiment
 eqname = "nias"
@@ -25,10 +26,10 @@ tavgwidth = 0.5
 treffreq = 2.0
 
 # frequencies used in inversion
-tinvfreq = [2.0, 3.0, 4.0]
+tinvfreq = 2.0:1.0:4.0
 
 # minimum CCs for T-wave pairs (at inversion frequencies)
-tmincc = [0.6, 0.5, 0.4]
+tmincc = 0.6:-0.1:0.4
 
 # excluded time periods: before 2004-08-01 and periods with uncorrected clock error
 excludetimes = [[Date(2001, 1, 1) Date(2004, 8, 1)],
@@ -103,35 +104,53 @@ m = length(t)
 l = length(tinvfreq)
 
 # invert for P-wave delays without smoothing
-Δτp = E[1:nt,1:m]*(E[nt+1:nt+np,m+1:2m]\ppairs.Δτ)
+Δτp = E[1:nt,1:m]*(E[l*nt+1:l*nt+np,l*m+1:(l+1)*m]\ppairs.Δτ)
 
 # make cycle-skipping correction
 tpairs.Δτ = SOT.correctcycleskipping(tpairs, ppairs, E, S, P)
 
-# get travel time anomalies
-y = [vcat(tpairs.Δτ'...); repeat(ppairs.Δτ, 1, l)]
+# data vector
+y = [reshape(vcat(tpairs.Δτ'...), l*nt); ppairs.Δτ]
+
+# get least-squares solution
 x = P*(E'*y)
-τ = D*x
 
-# calculate error
-σ2 = 1/(nt+np-m-1)*sum((y - E*x).^2, dims=1)
-A = D*P*E'
-τerr = sqrt.(σ2.*diag(A*A'))
+# variance estimate
+n = y - E*x
+σt = sqrt(mean(n[1:l*nt].^2)*(l*nt+np)/(l*nt+np-l*m-1))
+σp = sqrt(mean(n[l*nt+1:l*nt+np].^2)*(l*nt+np)/(l*nt+np-l*m-1))
+R = spdiagm(0 => [σt^2*ones(l*nt); σp^2*ones(np)])
 
-# get travel time differences between frequencies
-δy = y[:,1] .- y[:,2:l]
-δx = x[:,1] .- x[:,2:l]
-δτ = D*δx
+# matrix for error propagation
+A = P*E'
 
-# calculate error
-σ2 = 1/(nt+np-m-1)*sum((δy - E*δx).^2, dims=1)
-δτerr = sqrt.(σ2.*diag(A*A'))
+# get travel time anomalies and their errors
+τ = reshape(D*x, (m, l))
+τerr = reshape(sqrt.(diag(D*A*R*A'*D')), (m, l))
+
+# get frequency differences and their errors
+δD = [vcat([I(m) for i = 1:l-1]...) -I((l-1)*m) spzeros((l-1)*m, m)]
+δτ = reshape(δD*x, (m, l-1))
+δτerr = reshape(sqrt.(diag(δD*A*R*A'*δD')), (m, l-1))
 
 # read and interpolate ECCO data
 tecco = h5read("data/ecco/nias_H08.h5", "time")
 tr = Dates.value.(t - DateTime(2000, 1, 1, 12, 0, 0))/1000/3600/24
 τecco = hcat([interpolate((tecco,), h5read("data/ecco/nias_H08.h5", "tau")[:,i],
                           Gridded(Linear()))(tr) for i = 1:2]...)
+
+# estimate trends
+cτecco, _ = SOT.lineartrend(t, τecco[:,1]; fitannual=true, fitsemiannual=true)
+cτ, _ = SOT.lineartrend(t, τ[:,1]; fitannual=true, fitsemiannual=true)
+cδτecco, _ = SOT.lineartrend(t, τecco[:,1] - τecco[:,2]; fitannual=true, fitsemiannual=true)
+cδτ, _ = SOT.lineartrend(t, δτ[:,l-1]; fitannual=true, fitsemiannual=true)
+
+# offset based on trends
+tr = Dates.value.(t .- t[1])/1000/3600/24
+τ .-= cτ[2] + cτ[1]*tr[m]/2
+cτ[2] -= cτ[2] + cτ[1]*tr[m]/2
+τecco .-= cτecco[2] + cτecco[1]*tr[m]/2
+cτecco[2] -= cτecco[2] + cτecco[1]*tr[m]/2
 
 # plot measured vs. inverted T-wave delays (lowest freq.)
 fig, ax = subplots(1, 1)
@@ -169,35 +188,63 @@ ax.set_title("P waves")
 ax.set_xlabel("measured delay (s)")
 ax.set_ylabel("inverted delay (s)")
 
+# insert gaps
+function insertgap(t, ys, tgap)
+  idx = findlast(t .< tgap)
+  m = length(t)
+  if !isnothing(idx) && idx < m
+    tg = [t[1:idx]; tgap; t[idx+1:m]]
+    ysg = []
+    for y in ys
+      l = size(y, 2)
+      push!(ysg, [y[1:idx,:]; [NaN for i=1:l]'; y[idx+1:m,:]])
+    end
+  else
+    tg = t
+    ysg = ys
+  end
+  return tg, ysg...
+end
+
+# hydrophone gap
+tg, τg, τerrg, δτg, δτerrg, τeccog = insertgap(t, [τ, τerr, δτ, δτerr, τecco],
+                                               Date(2007, 1, 1))
+
+# excluded periods
+for i = 1:length(excludetimes)
+  global tg, τg, τerrg, δτg, δτerrg, τeccog
+  tg, τg, τerrg, δτg, δτerrg, τeccog = insertgap(tg, [τg, τerrg, δτg, δτerrg, τeccog],
+                                                 excludetimes[i][1])
+end
+
 # plot timeseries
 colors = matplotlib.rcParams["axes.prop_cycle"].by_key()["color"]
 fig, ax = subplots(2, 1, figsize=(16, 6.4), sharex=true)
-ax[1].plot(t, τecco[:,2], color="tab:gray", zorder=0)
-ax[2].plot(t, τecco[:,1] - τecco[:,2], color="tab:gray", zorder=0)
-for i = 1:l
-  ax[1].plot(t, τ[:,i], color=colors[i], zorder=i, label=@sprintf("%3.1f Hz", tinvfreq[i]))
-  ax[1].scatter(t, τ[:,i], s=5, c=colors[i], zorder=i)
-  ax[1].fill_between(t, τ[:,i] - 2τerr[:,i], τ[:,i] + 2τerr[:,i], alpha=.25,
-                     color=colors[i], linewidths=0, zorder=i)
-  if i > 1
-    ax[2].plot(t, δτ[:,i-1], color=colors[i], zorder=i,
-               label=@sprintf("%3.1f Hz – %3.1f Hz", tinvfreq[1], tinvfreq[i]))
-    ax[2].scatter(t, δτ[:,i-1], s=5, color=colors[i], zorder=i)
-    ax[2].fill_between(t, δτ[:,i-1] - 2δτerr[:,i-1], δτ[:,i-1] + 2δτerr[:,i-1], alpha=.25,
-                       color=colors[i], linewidths=0, zorder=i)
-  end
-end
+ax[1].plot(tg, τg[:,1], color="tab:blue", zorder=1, label="\$T\$ waves")
+ax[1].scatter(t, τ[:,1], s=2, c="tab:blue", zorder=1)
+ax[1].fill_between(tg, τg[:,1] - 2τerrg[:,1], τg[:,1] + 2τerrg[:,1], alpha=.25,
+                   color="tab:blue", linewidths=0, zorder=1)
+ax[2].plot(tg, δτg[:,l-1], color="tab:blue", zorder=1, label="\$T\$ waves")
+ax[2].scatter(t, δτ[:,l-1], s=2, color="tab:blue", zorder=1)
+ax[2].fill_between(tg, δτg[:,l-1] - 2δτerrg[:,l-1], δτg[:,l-1] + 2δτerrg[:,l-1], alpha=.25,
+                   color="tab:blue", linewidths=0, zorder=1)
+ax[1].plot(tg, τeccog[:,1], color="tab:orange", zorder=0, label="ECCO")
+ax[2].plot(tg, τeccog[:,1] - τeccog[:,2], color="tab:orange", zorder=0, label="ECCO")
+ax[1].plot(t, cτecco[1]*tr .+ cτecco[2], color="tab:orange", zorder=0)
+ax[1].plot(t, cτ[1]*tr .+ cτ[2], color="tab:blue", zorder=1)
+ax[2].plot(t, cδτecco[1]*tr .+ cδτecco[2], color="tab:orange", zorder=0)
+ax[2].plot(t, cδτ[1]*tr .+ cδτ[2], color="tab:blue", zorder=1)
 ax[1].invert_yaxis()
-ax[1].legend(frameon=false)
-ax[2].legend(frameon=false)
-ax[1].axhline(0, color="black", linewidth=.8, zorder=0)
-ax[2].axhline(0, color="black", linewidth=.8, zorder=0)
+ax[1].legend(frameon=false, loc=4)
+ax[2].legend(frameon=false, loc=4)
 ax[1].set_xlim(t[1] - (t[end] - t[1])÷100, t[end] + (t[end] - t[1])÷100)
 ax[1].set_ylabel("travel time anomaly (s)")
 ax[2].set_ylabel("travel time difference (s)")
+fig.align_ylabels()
 fig.tight_layout()
 
-# plot measured vs. inverted delays for all possible combination of T and P pairs
+# plot measured vs. inverted T-wave delays with P-wave delays estimated from inversion
+# without smoothing
 fig, ax = subplots()
 ax.set_aspect(1)
 ax.scatter(y[1:nt,1] - Δτp[:,1], E[1:nt,:]*x[:,1] - Δτp[:,1], s=5)
