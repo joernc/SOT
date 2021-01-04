@@ -1,4 +1,5 @@
 using .SOT, PyPlot, Printf, Dates, LinearAlgebra, Statistics, SparseArrays
+using HDF5, Interpolations
 
 # identifier for experiment
 eqname = "nias"
@@ -89,6 +90,17 @@ A = P*E'
 δD = [vcat([I(m) for i = 1:l-1]...) -I((l-1)*m) spzeros((l-1)*m, m)]
 δτ = reshape(δD*x, (m, l-1))
 δτerr = reshape(sqrt.(diag(δD*A*R*A'*δD')), (m, l-1))
+
+# save times series to file
+tr = Dates.value.(t - DateTime(2000, 1, 1, 0, 0, 0))/1000/3600/24
+h5open("results/nias_H01.h5", "w") do file
+  write(file, "t", tr)
+  write(file, "tau", τ)
+  write(file, "tauerr", τerr)
+  write(file, "dtau", δτ)
+#  write(file, "dtauerr", δτerr)
+#  write(file, "tauecco", τecco)
+end
 
 # estimate trends
 cτ, _ = SOT.lineartrend(t, τ[:,1]; fitannual=true, fitsemiannual=true)

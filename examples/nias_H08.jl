@@ -139,6 +139,17 @@ tr = Dates.value.(t - DateTime(2000, 1, 1, 12, 0, 0))/1000/3600/24
 τecco = hcat([interpolate((tecco,), h5read("data/ecco/nias_H08.h5", "tau")[:,i],
                           Gridded(Linear()))(tr) for i = 1:2]...)
 
+# save times series to file
+tr = Dates.value.(t - DateTime(2000, 1, 1, 0, 0, 0))/1000/3600/24
+h5open("results/nias_H08.h5", "w") do file
+  write(file, "t", tr)
+  write(file, "tau", τ)
+  write(file, "tauerr", τerr)
+  write(file, "dtau", δτ)
+  write(file, "dtauerr", δτerr)
+  write(file, "tauecco", τecco)
+end
+
 # estimate trends
 cτecco, _ = SOT.lineartrend(t, τecco[:,1]; fitannual=true, fitsemiannual=true)
 cτ, _ = SOT.lineartrend(t, τ[:,1]; fitannual=true, fitsemiannual=true)
