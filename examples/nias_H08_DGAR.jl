@@ -14,7 +14,7 @@ pintervals = [[-3, 47], [-3, 47], [-3, 47], [-3, 47]]
 pfreqbands = [[1, 3], [1, 3], [1.5, 2.5], [1, 3]]
 
 # T-wave station
-tstations = ["H08S2"]
+tstations = ["II.DGAR.00.BHZ"]
 
 # T-wave time window around predicted arrival time
 tintervals = [[-10, 70]]
@@ -26,15 +26,13 @@ tavgwidth = 0.5
 treffreq = 2.0
 
 # frequencies used in inversion
-tinvfreq = 2.0:1.0:4.0
+tinvfreq = [2.0, 3.0]
 
 # minimum CCs for T-wave pairs (at inversion frequencies)
-tmincc = 0.6:-0.1:0.4
+tmincc = [0.6, 0.5]
 
-# excluded time periods: before 2004-08-01 and periods with uncorrected clock error
-excludetimes = [[Date(2001, 1, 1) Date(2004, 8, 1)],
-                [DateTime("2010-03-16T00:00:00") DateTime("2010-05-17T02:06:17.760")],
-                [Date(2017, 6, 1) Date(2018, 1, 1)]]
+# excluded time period: before 2004-12-01
+excludetimes = [[Date(2001, 1, 1) Date(2004, 12, 1)]]
 
 # download P-wave data
 SOT.downloadseisdata(eqname, pstations)
@@ -45,6 +43,9 @@ SOT.cutpwaves(eqname, pstations, pintervals, pfreqbands)
 # find P-wave pairs
 SOT.findpairs(eqname, pstations, pintervals, pfreqbands, saveplot=true)
 
+# download T-wave data
+SOT.downloadseisdata(eqname, tstations)
+
 # measure T-wave lags Δτ
 SOT.twavepick(eqname, tstations, tintervals, tavgwidth, treffreq, pstations, pintervals,
               pfreqbands, saveplot=true)
@@ -54,41 +55,14 @@ tpairs, ppairs = SOT.collectpairs(eqname, tstations, tintervals, tavgwidth, tref
                                   tinvfreq, tmincc, pstations, pintervals, pfreqbands;
                                   excludetimes)
 
-# H08 clock error correction
-function timingcorrection!(tpairs, starttime, endtime, c)
-  idx1 = starttime .< tpairs.event1 .< endtime
-  idx2 = starttime .< tpairs.event2 .< endtime
-  for i = findall(idx1)
-    tpairs.Δτl[i] .-= c*((tpairs.event1[i] .- starttime)./(endtime - starttime))
-    tpairs.Δτc[i] .-= c*((tpairs.event1[i] .- starttime)./(endtime - starttime))
-    tpairs.Δτr[i] .-= c*((tpairs.event1[i] .- starttime)./(endtime - starttime))
-  end
-  for i = findall(idx2)
-    tpairs.Δτl[i] .+= c*((tpairs.event2[i] .- starttime)./(endtime - starttime))
-    tpairs.Δτc[i] .+= c*((tpairs.event2[i] .- starttime)./(endtime - starttime))
-    tpairs.Δτr[i] .+= c*((tpairs.event2[i] .- starttime)./(endtime - starttime))
-  end
+# DGAR clock error correction
+breaktime = DateTime(2012, 3, 17)
+idx = (tpairs.event1 .< breaktime) .& (tpairs.event2 .> breaktime)
+for i = findall(idx)
+  tpairs.Δτl[i] .-= 1.0
+  tpairs.Δτc[i] .-= 1.0
+  tpairs.Δτr[i] .-= 1.0
 end
-
-# correct based on comparison with DGAR
-timingcorrection!(tpairs, DateTime("2010-01-23T08:13:52.666"),
-                  DateTime("2010-03-16T00:00:00"), 2.311)
-timingcorrection!(tpairs, DateTime("2010-05-17T02:06:17.760"),
-                  DateTime("2010-10-09T23:59:52.747"), 7.060)
-timingcorrection!(tpairs, DateTime("2010-10-09T23:59:52.747"),
-                  DateTime("2010-12-16T02:03:23.040"), 3.427)
-timingcorrection!(tpairs, DateTime("2010-12-16T02:03:23.040"),
-                  DateTime("2011-02-22T09:43:45.858"), 3.495)
-timingcorrection!(tpairs, DateTime("2011-02-22T09:43:45.858"),
-                  DateTime("2011-03-24T07:55:37.542"), 1.593)
-timingcorrection!(tpairs, DateTime("2011-03-24T07:55:37.542"),
-                  DateTime("2011-04-18T01:59:00.042"), 1.276)
-timingcorrection!(tpairs, DateTime("2011-04-18T01:59:00.042"),
-                  DateTime("2011-08-27T23:59:52.317"), 6.678)
-timingcorrection!(tpairs, DateTime("2011-08-27T23:59:52.317"),
-                  DateTime("2011-12-24T23:59:52.453"), 6.786)
-timingcorrection!(tpairs, DateTime("2011-12-24T23:59:52.453"),
-                  DateTime("2012-01-20T00:00:00.000"), 1.495)
 
 # perform inversion
 t, E, S, P, D = SOT.invert(tpairs, ppairs)
@@ -136,12 +110,12 @@ A = P*E'
 # read and interpolate ECCO data
 tecco = h5read("data/ecco/nias_H08.h5", "time")
 tr = Dates.value.(t - DateTime(2000, 1, 1, 12, 0, 0))/1000/3600/24
-τecco = hcat([interpolate((tecco,), h5read("data/ecco/nias_H08.h5", "tau")[:,i],
-                          Gridded(Linear()))(tr) for i = 1:2]...)
+τecco = hcat([extrapolate(interpolate((tecco,), h5read("data/ecco/nias_H08.h5", "tau")[:,i],
+                                      Gridded(Linear())), Flat())(tr) for i = 1:2]...)
 
 # save timeseries to file
 tr = Dates.value.(t - DateTime(2000, 1, 1, 0, 0, 0))/1000/3600/24
-h5open("results/nias_H08.h5", "w") do file
+h5open("results/nias_H08_DGAR.h5", "w") do file
   write(file, "t", tr)
   write(file, "tau", τ)
   write(file, "tauerr", τerr)
@@ -217,10 +191,12 @@ function insertgap(t, ys, tgap)
   return tg, ysg...
 end
 
-# hydrophone gap
-tg, τg, τerrg, δτg, δτerrg, τeccog = insertgap(t, [τ, τerr, δτ, δτerr, τecco],
-                                               Date(2007, 1, 1))
-
+tg = copy(t)
+τg = copy(τ)
+τerrg = copy(τerr)
+δτg = copy(δτ)
+δτerrg = copy(δτerr)
+τeccog = copy(τecco)
 # excluded periods
 for i = 1:length(excludetimes)
   global tg, τg, τerrg, δτg, δτerrg, τeccog

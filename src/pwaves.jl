@@ -12,7 +12,7 @@ global model = taup.TauPyModel(model="prem")
 Download the P waveforms for the event catalog specified by `eqname` and the stations (and
 channels) specified in `stations`. Currently, one full hour after the event is downloaded.
 """
-function downloadpwaves(eqname, stations; src="IRIS")
+function downloadseisdata(eqname, stations; src="IRIS")
 
   # load event catalog
   events = DataFrame(CSV.File(@sprintf("data/catalogs/%s.csv", eqname)))
@@ -21,7 +21,7 @@ function downloadpwaves(eqname, stations; src="IRIS")
   for s in stations
 
     # path to P-waveform directory
-    path = @sprintf("data/pdata/%s_%s", eqname, s)
+    path = seisdatadir(eqname, s)
 
     # create directory if needed
     mkpath(path)
@@ -106,8 +106,8 @@ function cutpwaves(eqname, stations, intervals, freqbands)
   for i in 1 : length(stations)
 
     # path to P-waveform directory
-    datapath = pdatadir(eqname, stations[i])
-    wavepath = pwavedir(eqname, stations[i], intervals[i], freqbands[i])
+    datapath = seisdatadir(eqname, stations[i])
+    wavepath = seiswavedir(eqname, stations[i], intervals[i], freqbands[i])
 
     # create directory if needed
     mkpath(wavepath)
@@ -303,7 +303,7 @@ end
 fmttime(time) = Dates.format(time, "yyyy-mm-ddTHH:MM:SS.ss")
 
 "Directory for raw P-wave data"
-pdatadir(eqname, station) = @sprintf("data/pdata/%s_%s", eqname, station)
+seisdatadir(eqname, station) = @sprintf("data/seisdata/%s_%s", eqname, station)
 
 "Directory for processed P waveforms"
 pwavedir(eqname, station, interval, freqband) = @sprintf("data/pwaves/%s_%s_%+03d_%+03d_%3.1f_%3.1f", eqname, station, interval[1], interval[2], freqband[1], freqband[2])

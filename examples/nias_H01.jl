@@ -32,7 +32,7 @@ tinvfreq = 2.5:0.75:4.0
 tmincc = 0.6:-0.1:0.4
 
 # download P-wave data
-SOT.downloadpwaves(eqname, pstations)
+SOT.downloadseisdata(eqname, pstations)
 
 # cut and filter P waveforms
 SOT.cutpwaves(eqname, pstations, pintervals, pfreqbands)
@@ -91,7 +91,7 @@ A = P*E'
 δτ = reshape(δD*x, (m, l-1))
 δτerr = reshape(sqrt.(diag(δD*A*R*A'*δD')), (m, l-1))
 
-# save times series to file
+# save timeseries to file
 tr = Dates.value.(t - DateTime(2000, 1, 1, 0, 0, 0))/1000/3600/24
 h5open("results/nias_H01.h5", "w") do file
   write(file, "t", tr)

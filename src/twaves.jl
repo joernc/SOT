@@ -52,9 +52,6 @@ function twavepick(eqname, tstations, tintervals, tavgwidth, treffreq, pstations
   # loop over T-wave stations
   for i = 1 : length(tstations)
 
-    # station location
-    stalat, stalon = DataFrame(CSV.File(tstationlocfile(tstations[i])))[1,:]
-
     # iterate over pairs
     for j = 1 : size(pairs, 1)
 
@@ -77,15 +74,23 @@ function twavepick(eqname, tstations, tintervals, tavgwidth, treffreq, pstations
       end
 
       # files from which to read T-wave data
-      twavefile1 = twavefile(tstations[i], pairs[j,:event1])
-      twavefile2 = twavefile(tstations[i], pairs[j,:event2])
+      tdatafile1 = tdatafile(eqname, tstations[i], pairs[j,:event1])
+      tdatafile2 = tdatafile(eqname, tstations[i], pairs[j,:event2])
 
       # check whether all data is present
-      if !isfile(tdelayfile) && isfile(twavefile1) && isfile(twavefile2)
+      if !isfile(tdelayfile) && isfile(tdatafile1) && isfile(tdatafile2)
 
-        # load both waveforms
-        trace1 = read_sac(twavefile1)
-        trace2 = read_sac(twavefile2)
+        if ishydr(tstations[i])
+
+          # station location
+          stalat, stalon = DataFrame(CSV.File(tstationlocfile(tstations[i])))[1,:]
+
+        else
+
+          # station location
+          stalat, stalon = h5read(tdatafile1, "latitude"), h5read(tdatafile2, "longitude")
+
+        end
 
         # estimate travel time from geodetic distance
         evtlat = .5(pairs[j,:latitude1] + pairs[j,:latitude2])
@@ -93,18 +98,54 @@ function twavepick(eqname, tstations, tintervals, tavgwidth, treffreq, pstations
         range = dist(evtlon, evtlat, stalon, stalat)
         traveltime = range/soundspeed
 
-        # sampling interval
-        Δ1 = trace1.delta
-        Δ2 = trace2.delta
+        if ishydr(tstations[i])
+
+          # load both waveforms
+          trace1 = read_sac(tdatafile1)
+          trace2 = read_sac(tdatafile2)
+
+          # sampling interval
+          Δ1 = trace1.delta
+          Δ2 = trace2.delta
+
+          # first times in files
+          starttime1 = trace1.evt.time + Microsecond(Int(round(trace1.b*1e6)))
+          starttime2 = trace2.evt.time + Microsecond(Int(round(trace2.b*1e6)))
+
+          # extract signals
+          s1 = Float64.(trace1.t)
+          s2 = Float64.(trace2.t)
+
+        else
+
+          # open files
+          fid1 = h5open(tdatafile1, "r")
+          fid2 = h5open(tdatafile2, "r")
+
+          # sampling interval
+          Δ1 = read(fid1, "fs")^-1
+          Δ2 = read(fid2, "fs")^-1
+
+          # extract signals
+          s1 = read(fid1, "trace")
+          s2 = read(fid2, "trace")
+
+          # first times in files
+          starttime1 = DateTime(1970, 1, 1) + Microsecond(read(fid1, "starttime"))
+          starttime2 = DateTime(1970, 1, 1) + Microsecond(read(fid2, "starttime"))
+
+          # close files
+          close(fid1)
+          close(fid2)
+
+        end
+
+        # average sampling interval
         Δ = (Δ1 + Δ2)/2
 
         # lengths of traces
-        N1 = length(trace1.t)
-        N2 = length(trace2.t)
-
-        # first times in files
-        starttime1 = trace1.evt.time + Microsecond(Int(round(trace1.b*1e6)))
-        starttime2 = trace2.evt.time + Microsecond(Int(round(trace2.b*1e6)))
+        N1 = length(s1)
+        N2 = length(s2)
 
         # times of samples
         time1 = starttime1 .+ Microsecond.(Int.(round.((0:N1-1)*Δ1*1e6)))
@@ -132,8 +173,8 @@ function twavepick(eqname, tstations, tintervals, tavgwidth, treffreq, pstations
           (mod(n, 2) == 1) && (n -= 1)
 
           # cut signals
-          s1 = Float64.(trace1.t[i1:i1+n-1])
-          s2 = Float64.(trace2.t[i2:i2+n-1])
+          s1 = s1[i1:i1+n-1]
+          s2 = s2[i2:i2+n-1]
 
           # remove means
           s1 .-= mean(s1)
@@ -327,10 +368,20 @@ function sweep!(maxlags, ccs, cc, freq, lags, i0, imax, fs)
 
 end
 
-twavefile(station, date) = @sprintf("data/tdata/%s/%d/%d_%d.sac", station, year(date),
-                                    year(date), dayofyear(date))
+"Check if station is a CTBTO hydrophone station"
+ishydr(station) = occursin(r"H[0,1][1-9][E,W,N,S][1-3]", station)
 
-tstationlocfile(station) = @sprintf("data/tdata/%s/loc.csv", station)
+function tdatafile(eqname, station, date)
+  if ishydr(station)
+    return @sprintf("data/%s/%s/%d/%d_%d.sac", dir, station, year(date), year(date),
+                    dayofyear(date))
+  else
+    fmttime = Dates.format(date, "yyyy-mm-ddTHH:MM:SS.ss")
+    return @sprintf("%s/%s.h5", seisdatadir(eqname, station), fmttime)
+  end
+end
+
+tstationlocfile(station) = @sprintf("data/hydrdata/%s/loc.csv", station)
 
 tdelaydir(eqname, station, interval, avgwidth, reffreq) = @sprintf("data/tdelays/%s_%s_%+02d_%+02d_%3.1f_%3.1f", eqname, station, interval[1], interval[2], avgwidth, reffreq)
 
