@@ -231,11 +231,11 @@ end
 # plot timeseries
 colors = matplotlib.rcParams["axes.prop_cycle"].by_key()["color"]
 fig, ax = subplots(2, 1, figsize=(16, 6.4), sharex=true)
-ax[1].plot(tg, τg[:,1], color="tab:blue", zorder=1, label="\$T\$ waves")
+ax[1].plot(tg, τg[:,1], color="tab:blue", zorder=1, label=L"$T$ waves")
 ax[1].scatter(t, τ[:,1], s=2, c="tab:blue", zorder=1)
 ax[1].fill_between(tg, τg[:,1] - 2τerrg[:,1], τg[:,1] + 2τerrg[:,1], alpha=.25,
                    color="tab:blue", linewidths=0, zorder=1)
-ax[2].plot(tg, δτg[:,l-1], color="tab:blue", zorder=1, label="\$T\$ waves")
+ax[2].plot(tg, δτg[:,l-1], color="tab:blue", zorder=1, label=L"$T$ waves")
 ax[2].scatter(t, δτ[:,l-1], s=2, color="tab:blue", zorder=1)
 ax[2].fill_between(tg, δτg[:,l-1] - 2δτerrg[:,l-1], δτg[:,l-1] + 2δτerrg[:,l-1], alpha=.25,
                    color="tab:blue", linewidths=0, zorder=1)

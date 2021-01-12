@@ -216,6 +216,8 @@ function twavepick(eqname, tstations, tintervals, tavgwidth, treffreq, pstations
           Δτl, Δτc, Δτr, ccc, ccr, ccl = findmaxcc(cc, tfreq, lags, treffreq, 1/Δ)
           i0 = argmin(abs.(tfreq .- treffreq))
 
+          @printf("CC = %4.2f\n", ccc[i0])
+
           # save figure if CC ≥ 0.6
           if saveplot && ccc[i0] ≥ 0.6
             fig = figure()
@@ -373,7 +375,7 @@ ishydr(station) = occursin(r"H[0,1][1-9][E,W,N,S][1-3]", station)
 
 function tdatafile(eqname, station, date)
   if ishydr(station)
-    return @sprintf("data/%s/%s/%d/%d_%d.sac", dir, station, year(date), year(date),
+    return @sprintf("data/hydrdata/%s/%d/%d_%d.sac", station, year(date), year(date),
                     dayofyear(date))
   else
     fmttime = Dates.format(date, "yyyy-mm-ddTHH:MM:SS.ss")
