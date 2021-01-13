@@ -1,5 +1,5 @@
 using .SOT, PyPlot, Printf, Dates, LinearAlgebra, Statistics, SparseArrays
-using HDF5, Interpolations
+using HDF5, Interpolations, DataFrames, CSV
 
 # identifier for experiment
 eqname = "nias"
@@ -34,6 +34,9 @@ tmincc = [0.6, 0.5]
 # excluded time period: before 2004-12-01
 excludetimes = [[Date(2001, 1, 1) Date(2004, 12, 1)]]
 
+# manually exclude pairs
+excludepairs = CSV.read("data/catalogs/nias_DGAR_exclude.csv", DataFrame)
+
 # download P-wave data
 SOT.downloadseisdata(eqname, pstations)
 
@@ -53,7 +56,7 @@ SOT.twavepick(eqname, tstations, tintervals, tavgwidth, treffreq, pstations, pin
 # collect usable pairs
 tpairs, ppairs = SOT.collectpairs(eqname, tstations, tintervals, tavgwidth, treffreq,
                                   tinvfreq, tmincc, pstations, pintervals, pfreqbands;
-                                  excludetimes)
+                                  excludetimes, excludepairs)
 
 # DGAR clock error correction
 breaktime = DateTime(2012, 3, 17)

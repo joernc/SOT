@@ -1,5 +1,5 @@
 using .SOT, PyPlot, Printf, Dates, LinearAlgebra, Statistics, SparseArrays
-using HDF5, Interpolations
+using HDF5, Interpolations, DataFrames, CSV
 
 # identifier for experiment
 eqname = "nias_tm"
@@ -36,6 +36,9 @@ excludetimes = [[Date(2001, 1, 1) Date(2004, 8, 1)],
                 [DateTime("2010-03-16T00:00:00") DateTime("2010-05-17T02:06:17.760")],
                 [Date(2017, 6, 1) Date(2018, 1, 1)]]
 
+# manually exclude pairs
+excludepairs = CSV.read("data/catalogs/nias_tm_H08_exclude.csv", DataFrame)
+
 # measure T-wave lags Δτ
 SOT.twavepick(eqname, tstations, tintervals, tavgwidth, treffreq, pstations, pintervals,
               pfreqbands, saveplot=true)
@@ -43,7 +46,7 @@ SOT.twavepick(eqname, tstations, tintervals, tavgwidth, treffreq, pstations, pin
 # collect usable pairs
 tpairs, ppairs = SOT.collectpairs(eqname, tstations, tintervals, tavgwidth, treffreq,
                                   tinvfreq, tmincc, pstations, pintervals, pfreqbands;
-                                  excludetimes)
+                                  excludetimes, excludepairs)
 
 # H08 clock error correction
 function timingcorrection!(tpairs, starttime, endtime, c)

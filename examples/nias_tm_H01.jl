@@ -1,5 +1,5 @@
 using .SOT, PyPlot, Printf, Dates, LinearAlgebra, Statistics, SparseArrays
-using HDF5, Interpolations
+using HDF5, Interpolations, DataFrames, CSV
 
 # identifier for experiment
 eqname = "nias_tm"
@@ -31,13 +31,17 @@ tinvfreq = 2.5:0.75:4.0
 # minimum CCs for T-wave pairs (at inversion frequencies)
 tmincc = 0.6:-0.1:0.4
 
+# manually exclude pairs
+excludepairs = CSV.read("data/catalogs/nias_tm_H01_exclude.csv", DataFrame)
+
 # measure T-wave lags Δτ
 SOT.twavepick(eqname, tstations, tintervals, tavgwidth, treffreq, pstations, pintervals,
               pfreqbands, saveplot=true)
 
 # collect usable pairs
 tpairs, ppairs = SOT.collectpairs(eqname, tstations, tintervals, tavgwidth, treffreq,
-                                  tinvfreq, tmincc, pstations, pintervals, pfreqbands)
+                                  tinvfreq, tmincc, pstations, pintervals, pfreqbands;
+                                  excludepairs)
 
 # perform inversion
 t, E, S, P, D = SOT.invert(tpairs, ppairs)

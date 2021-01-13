@@ -5,13 +5,13 @@
 global const meanyear = 365.2425
 
 """
-    collectpairs(eqname, tstations, pstations, invfreq, mincc; maxΔτ=Inf, excludetimes=[])
+    collectpairs(eqname, tstations, pstations, invfreq, mincc; maxΔτ=Inf, excludetimes=[], excludepairs=[])
 
 Collect all *T*- and *P*-wave pairs from the specified `tstations` and `pstations` that meet
 certain criteria and record the measurements at the frequencies specified by `invfreq`. The
 *T*-wave measurements are required to have a minimum cross-correlation coefficient of
-`mincc`. *T*-wave outliers can be excluded with `maxΔτ`, and time periods can be excluded
-with `excludetimes`.
+`mincc`. *T*-wave outliers can be excluded with `maxΔτ`, time periods can be excluded with
+`excludetimes`, and specific pairs can be excluded with `excludepairs`.
 
 # Examples
 ```
@@ -23,7 +23,9 @@ julia> tpairs, ppairs = SOT.collectpairs("nias", ["H08S2..EDH"], ["PSI"], [2, 4]
 ```
 """
 function collectpairs(eqname, tstations, tintervals, tavgwidth, treffreq, tinvfreq, tmincc,
-                      pstations, pintervals, pfreqbands; tmaxΔτ=Inf, excludetimes=[])
+                      pstations, pintervals, pfreqbands; tmaxΔτ=Inf, excludetimes=[],
+                      excludepairs=DataFrame(pstation=String[], event1=DateTime[],
+                                             event2=DateTime[]))
 
   # number of frequencies at which to perform inversion
   l = length(tinvfreq)
@@ -32,7 +34,12 @@ function collectpairs(eqname, tstations, tintervals, tavgwidth, treffreq, tinvfr
   ppairs = DataFrame[]
   for i = 1 : size(pstations, 1)
     filename = paircatfile(eqname, pstations[i], pintervals[i], pfreqbands[i])
-    push!(ppairs, DataFrame(CSV.File(filename, select=1:6, comment="#")))
+    push!(ppairs, DataFrame(CSV.File(filename, select=1:6)))
+    # exclude specified pairs
+    for e = eachrow(excludepairs[excludepairs.pstation.==pstations[i],:])
+      exclude = (ppairs[i].event1 .== e.event1) .& (ppairs[i].event2 .== e.event2)
+      ppairs[i] = ppairs[i][.!exclude,:]
+    end
   end
   ppairs = sort(unique(vcat(ppairs...)))
 
@@ -102,10 +109,16 @@ function collectpairs(eqname, tstations, tintervals, tavgwidth, treffreq, tinvfr
 
     # P-wave catalog
     filename = paircatfile(eqname, pstations[i], pintervals[i], pfreqbands[i])
-    pairs = DataFrame(CSV.File(filename, comment="#"))
+    pairs = DataFrame(CSV.File(filename))
 
     # find pairs that were selected based on T-wave measurements
     selpairs = innerjoin(pairs, select(tpairs, [:event1, :event2]), on=[:event1, :event2])
+
+    # exclude specified pairs
+    for e = eachrow(excludepairs[excludepairs.pstation.==pstations[i],:])
+      exclude = (selpairs.event1 .== e.event1) .& (selpairs.event2 .== e.event2)
+      selpairs = selpairs[.!exclude,:]
+    end
 
     # add station information
     selpairs.station = pstations[i]
@@ -301,7 +314,7 @@ function correctcycleskipping(tpairs, ppairs, E, S, P)
     for j = dir
 
       # check if probability of belonging to different cluster is at least 0.1%
-      if T[j,idx[i]] ≥ 0.001
+      if T[j,idx[i]] ≥ 1e-3
 
         # swap out Δτ
         y[idx[i].+(0:l-1)*nt] = Δτa[idx[i],:,j]

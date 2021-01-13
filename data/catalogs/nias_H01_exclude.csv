@@ -1,0 +1,9 @@
+pstation,event1,event2,reason
+PS.PSI..BHZ,2010-10-10T14:56:30.01,2013-12-29T00:10:14.32,two cycles skipped
+MY.KUM..BHZ,2010-10-10T14:56:30.01,2013-12-29T00:10:14.32,two cycles skipped
+GE.GSI..BHZ,2010-10-10T14:56:30.01,2013-12-29T00:10:14.32,two cycles skipped
+MY.KUM..BHZ,2009-01-14T22:46:09.61,2010-04-26T12:02:34.02,involves suspect event
+MY.KUM..BHZ,2009-01-14T22:46:09.61,2012-10-31T09:56:27.40,involves suspect event
+MY.KUM..BHZ,2009-01-14T22:46:09.61,2013-05-15T19:59:43.91,involves suspect event
+MY.KUM..BHZ,2009-01-14T22:46:09.61,2014-01-31T19:19:45.67,involves suspect event
+MY.KUM..BHZ,2009-01-14T22:46:09.61,2017-12-25T03:38:12.41,involves suspect event

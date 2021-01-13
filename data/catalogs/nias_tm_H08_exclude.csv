@@ -1,0 +1,5 @@
+pstation,event1,event2,reason
+PS.PSI..BHZ,2008-07-19T22:50:21,2008-07-20T21:36:47,way out of range
+GE.GSI..BHZ,2007-10-27T18:35:15,2007-10-27T18:38:04,way out of range
+PS.PSI..BHZ,2005-11-18T17:11:07,2013-09-30T08:40:24,uncorrected cycle skip
+GE.GSI..BHZ,2006-07-14T05:30:03,2016-05-01T14:51:22,uncorrected cycle skip
