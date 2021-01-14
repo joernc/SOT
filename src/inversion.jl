@@ -208,6 +208,7 @@ function invert(tpairs, ppairs; timescale=NaN)
               0 => Δ.*(tr[2:m-1] - tr[1:m-2]).^-1,
               1 => -Δ.*((tr[2:m-1] - tr[1:m-2]).^-1 + (tr[3:m] - tr[2:m-1]).^-1),
               2 => Δ.*(tr[3:m] - tr[2:m-1]).^-1)
+  F = [F[1,:]'; F; F[m-2,:]']
 
   # difference matrix to get τ from T- and P-wave anomalies
   D = [I(l*m) vcat([-I(m) for i = 1:l]...)]
