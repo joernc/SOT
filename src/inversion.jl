@@ -1,5 +1,6 @@
 # TODO:
-# - Use sparse QR decomposition if inversion matrix becomes too big (qr([E; S])\y)?
+# - Use sparse QR decomposition if inversion matrix becomes too big or ill-conditioned
+#   (qr([E;S])\[y;zeros(l*m)]).
 
 # mean year in days
 global const meanyear = 365.2425
@@ -364,16 +365,16 @@ function correctcycleskipping(tpairs, ppairs, E, S, P)
 end
 
 """
-    lineartrend(t, b; fitannual=false, fitsemiannual=false)
+    c, ỹ = lineartrend(t, y; fitannual=false, fitsemiannual=false)
 
-Performs least-squares regression ``b = c_1 t + c_2 + ε``. If `fitannual`,
+Performs least-squares regression ``y = c_1 t + c_2 + ε``. If `fitannual`,
 ``c_4 sin ωt + c_5 sin ωt`` is also included in the regression, where ``ω`` is the annual
 frequency. If `fitsemiannual`, ``c_6 sin 2ωt + c_7 sin 2ωt`` is additionally included. The
 actual numbering of the output coefficients ``c_i`` (`c[i]`) depends on which cycles are
 included; the coefficients are in the above order. Returns the coefficient vector `c` and
 the adjusted data `b`.
 """
-function lineartrend(t, b; fitannual=false, fitsemiannual=false)
+function lineartrend(t, y; fitannual=false, fitsemiannual=false)
 
   # length of time vector
   m = length(t)
@@ -398,9 +399,9 @@ function lineartrend(t, b; fitannual=false, fitsemiannual=false)
   end
 
   # invert
-  c = E\b
+  x = E\y
 
   # return coefficients and adjusted data
-  return c, E*c
+  return x, E*x
 
 end

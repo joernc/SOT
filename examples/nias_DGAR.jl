@@ -110,10 +110,17 @@ A = P*E'
 δτ = reshape(δD*x, (m, l-1))
 δτerr = reshape(sqrt.(diag(δD*A*R*A'*δD')), (m, l-1))
 
+# read and interpolate Argo data
+targo = Dates.value.(Date(2004, 1, 15) .+ Month.(h5read("data/argo/nias_H08.h5", "time"))
+                     .- Date(2000, 1, 1))
+tr = Dates.value.(t - DateTime(2000, 1, 1, 12, 0, 0))/1000/3600/24
+τargo = hcat([extrapolate(interpolate((targo,), h5read("data/argo/nias_H08.h5", "tau")[i,:],
+                                      Gridded(Linear())), Flat())(tr) for i = 1:l]...)
+
 # read and interpolate ECCO data
 tecco = h5read("data/ecco/nias_H08.h5", "time")
 tr = Dates.value.(t - DateTime(2000, 1, 1, 12, 0, 0))/1000/3600/24
-τecco = hcat([extrapolate(interpolate((tecco,), h5read("data/ecco/nias_H08.h5", "tau")[:,i],
+τecco = hcat([extrapolate(interpolate((tecco,), h5read("data/ecco/nias_H08.h5", "tau")[i,:],
                                       Gridded(Linear())), Flat())(tr) for i = 1:2]...)
 
 # save timeseries to file
@@ -124,21 +131,33 @@ h5open("results/nias_DGAR.h5", "w") do file
   write(file, "tauerr", τerr)
   write(file, "dtau", δτ)
   write(file, "dtauerr", δτerr)
+  write(file, "tauargo", τargo)
   write(file, "tauecco", τecco)
 end
 
-# estimate trends
-cτecco, _ = SOT.lineartrend(t, τecco[:,1]; fitannual=true, fitsemiannual=true)
-cτ, _ = SOT.lineartrend(t, τ[:,1]; fitannual=true, fitsemiannual=true)
-cδτecco, _ = SOT.lineartrend(t, τecco[:,1] - τecco[:,2]; fitannual=true, fitsemiannual=true)
-cδτ, _ = SOT.lineartrend(t, δτ[:,l-1]; fitannual=true, fitsemiannual=true)
-
 # offset based on trends
 tr = Dates.value.(t .- t[1])/1000/3600/24
-τ .-= cτ[2] + cτ[1]*tr[m]/2
-cτ[2] -= cτ[2] + cτ[1]*tr[m]/2
-τecco .-= cτecco[2] + cτecco[1]*tr[m]/2
-cτecco[2] -= cτecco[2] + cτecco[1]*tr[m]/2
+for i = 1:l
+  c, _ = SOT.lineartrend(t, τ[:,i]; fitannual=true, fitsemiannual=true)
+  τ[:,i] .-= c[2] + c[1]*tr[end]/2
+  if i == 1
+    δτ[:,:] .-= c[2] + c[1]*tr[end]/2
+  else
+    δτ[:,i-1] .+= c[2] + c[1]*tr[end]/2
+  end
+  c, _ = SOT.lineartrend(t, τargo[:,i]; fitannual=true, fitsemiannual=true)
+  τargo[:,i] .-= c[2] + c[1]*tr[end]/2
+  c, _ = SOT.lineartrend(t, τecco[:,i]; fitannual=true, fitsemiannual=true)
+  τecco[:,i] .-= c[2] + c[1]*tr[end]/2
+end
+
+# estimate trends
+cτ, _ = SOT.lineartrend(t, τ[:,1]; fitannual=true, fitsemiannual=true)
+cτargo, _ = SOT.lineartrend(t, τargo[:,1]; fitannual=true, fitsemiannual=true)
+cτecco, _ = SOT.lineartrend(t, τecco[:,1]; fitannual=true, fitsemiannual=true)
+cδτ, _ = SOT.lineartrend(t, δτ[:,l-1]; fitannual=true, fitsemiannual=true)
+cδτargo, _ = SOT.lineartrend(t, τargo[:,1] - τargo[:,l]; fitannual=true, fitsemiannual=true)
+cδτecco, _ = SOT.lineartrend(t, τecco[:,1] - τecco[:,l]; fitannual=true, fitsemiannual=true)
 
 # plot measured vs. inverted T-wave delays (lowest freq.)
 fig, ax = subplots(1, 1)
@@ -199,34 +218,39 @@ tg = copy(t)
 τerrg = copy(τerr)
 δτg = copy(δτ)
 δτerrg = copy(δτerr)
+τargog = copy(τargo)
 τeccog = copy(τecco)
 # excluded periods
 for i = 1:length(excludetimes)
-  global tg, τg, τerrg, δτg, δτerrg, τeccog
-  tg, τg, τerrg, δτg, δτerrg, τeccog = insertgap(tg, [τg, τerrg, δτg, δτerrg, τeccog],
-                                                 excludetimes[i][1])
+  global tg, τg, τerrg, δτg, δτerrg, τargog, τeccog
+  tg, τg, τerrg, δτg, δτerrg, τargog, τeccog = insertgap(tg, [τg, τerrg, δτg, δτerrg,
+                                                              τargog, τeccog],
+                                                         excludetimes[i][1])
 end
 
 # plot timeseries
-colors = matplotlib.rcParams["axes.prop_cycle"].by_key()["color"]
 fig, ax = subplots(2, 1, figsize=(16, 6.4), sharex=true)
-ax[1].plot(tg, τg[:,1], color="tab:blue", zorder=1, label=L"$T$ waves")
-ax[1].scatter(t, τ[:,1], s=2, c="tab:blue", zorder=1)
+ax[1].plot(tg, τg[:,1], color="tab:blue", zorder=3, label=L"$T$ waves")
+ax[1].scatter(t, τ[:,1], s=2, c="tab:blue", zorder=3)
 ax[1].fill_between(tg, τg[:,1] - 2τerrg[:,1], τg[:,1] + 2τerrg[:,1], alpha=.25,
-                   color="tab:blue", linewidths=0, zorder=1)
-ax[2].plot(tg, δτg[:,l-1], color="tab:blue", zorder=1, label=L"$T$ waves")
-ax[2].scatter(t, δτ[:,l-1], s=2, color="tab:blue", zorder=1)
+                   color="tab:blue", linewidths=0, zorder=3)
+ax[2].plot(tg, δτg[:,l-1], color="tab:blue", zorder=3, label=L"$T$ waves")
+ax[2].scatter(t, δτ[:,l-1], s=2, color="tab:blue", zorder=3)
 ax[2].fill_between(tg, δτg[:,l-1] - 2δτerrg[:,l-1], δτg[:,l-1] + 2δτerrg[:,l-1], alpha=.25,
-                   color="tab:blue", linewidths=0, zorder=1)
-ax[1].plot(tg, τeccog[:,1], color="tab:orange", zorder=0, label="ECCO")
-ax[2].plot(tg, τeccog[:,1] - τeccog[:,2], color="tab:orange", zorder=0, label="ECCO")
-ax[1].plot(t, cτecco[1]*tr .+ cτecco[2], color="tab:orange", zorder=0)
-ax[1].plot(t, cτ[1]*tr .+ cτ[2], color="tab:blue", zorder=1)
-ax[2].plot(t, cδτecco[1]*tr .+ cδτecco[2], color="tab:orange", zorder=0)
-ax[2].plot(t, cδτ[1]*tr .+ cδτ[2], color="tab:blue", zorder=1)
+                   color="tab:blue", linewidths=0, zorder=3)
+ax[1].plot(tg, τargog[:,1], color="tab:orange", zorder=1, label="Argo")
+ax[2].plot(tg, τargog[:,1] - τargog[:,l], color="tab:orange", zorder=1, label="Argo")
+ax[1].plot(tg, τeccog[:,1], color="tab:green", zorder=2, label="ECCO")
+ax[2].plot(tg, τeccog[:,1] - τeccog[:,l], color="tab:green", zorder=2, label="ECCO")
+ax[1].plot(t, cτargo[1]*tr .+ cτargo[2], color="tab:orange", zorder=1)
+ax[1].plot(t, cτecco[1]*tr .+ cτecco[2], color="tab:green", zorder=2)
+ax[1].plot(t, cτ[1]*tr .+ cτ[2], color="tab:blue", zorder=3)
+ax[2].plot(t, cδτargo[1]*tr .+ cδτargo[2], color="tab:orange", zorder=1)
+ax[2].plot(t, cδτecco[1]*tr .+ cδτecco[2], color="tab:green", zorder=2)
+ax[2].plot(t, cδτ[1]*tr .+ cδτ[2], color="tab:blue", zorder=3)
 ax[1].invert_yaxis()
-ax[1].legend(frameon=false, loc=4)
-ax[2].legend(frameon=false, loc=4)
+ax[1].legend(frameon=false, loc=4, ncol=3)
+ax[2].legend(frameon=false, loc=4, ncol=3)
 ax[1].set_xlim(t[1] - (t[end] - t[1])÷100, t[end] + (t[end] - t[1])÷100)
 ax[1].set_ylabel("travel time anomaly (s)")
 ax[2].set_ylabel("travel time difference (s)")
