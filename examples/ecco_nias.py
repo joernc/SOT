@@ -27,7 +27,7 @@ xmink,xmaxk = -100e3,4500e3
 zmink,zmaxk = -6500.,0.
 
 # kernel grid spacing
-dxk,dzk = 10e3,100.
+dxk,dzk = 5e3,50.
 
 # kernel end points
 p2 = gcc.point_given_start_and_bearing(p10, crs1, xmaxk, unit='meters')
