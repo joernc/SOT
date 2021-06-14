@@ -27,7 +27,7 @@ xmink,xmaxk = -100e3,4500e3
 zmink,zmaxk = -6500.,0.
 
 # kernel grid spacing
-dxk,dzk = 5e3,50.
+dxk,dzk = 10e3,100.
 
 # kernel end points
 p2 = gcc.point_given_start_and_bearing(p10, crs1, xmaxk, unit='meters')
@@ -281,7 +281,8 @@ else:
         # temperature kernel
         KTk[i,:,:] = Kc/c_bar*dcdT
     if ktemp:
-        np.savez('result/KTs_'+name+'.npz',KT = KTk,x=xk,z=zk,f=frqs)
+        da = xr.DataArray(KTk,[("freq", frqs),("x",xk),("z",zk)],)
+        da.to_netcdf('data/knl/KTs_'+name+'.nc')
 
     for e, dt64 in enumerate(dt64_events):
         if (vert and wdtau and wvel)==0:
