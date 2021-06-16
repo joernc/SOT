@@ -45,7 +45,7 @@ ref,crho = 0,0
 # output timestep, and output choices 
 # for 1d vertical anomalies, scalar weighted anomalies and temperature kernels
 timestep = 'daily'
-vert,wdtau,ktemp,wvel = 0,0,1,0
+vert,wdtau,ktemp,wvel = 0,1,0,0
     
 ########
 # fill in coastal and bottom points (ignores points at the edge of the array)
@@ -153,6 +153,7 @@ def extrap1d(interpolator):
 
 #########
 if ref or crho:
+    print(f'Reference fields calculation for {name}...\n')
     head = 'D:\\Caltech\\Acoustics\\ecco\\v4r4\\'
     # load ECCO data
     dspT = xr.open_mfdataset(f'{head}inputFig2_Shirui\\THETA_2006_10_20.nc')
@@ -238,6 +239,7 @@ if ref or crho:
 
         file.close() 
 else:
+    print(f'Anomalies time series calculation for {name}...\n')
     # Get (lon,lat) for the grid points along the path
     fr = np.linspace(0,1,nxk)
     gridxk = np.deg2rad(np.array(list(map(ip,fr))))
@@ -285,7 +287,7 @@ else:
         da.to_netcdf('data/knl/KTs_'+name+'.nc')
 
     for e, dt64 in enumerate(dt64_events):
-        if (vert and wdtau and wvel)==0:
+        if (vert or wdtau or wvel)==0:
             break
 
         # find time stamps of ECCO data bracketing the event
@@ -326,47 +328,47 @@ else:
                 dspT1 = None
                 while dspT1 is None:
                     try:
-                        dspT1 = xr.open_mfdataset(f'{head}theta/daily/*THETA_{day1.year:4}_{day1.month:02}_{day1.day:02}.nc',combine='by_coords')
+                        dspT1 = xr.open_dataset(f'{head}nctiles_daily/theta/THETA_{day1.year:4}_{day1.month:02}_{day1.day:02}.nc')
                     except:
                         url = f'https://data.nas.nasa.gov/ecco/download_data.php?file=/eccodata/llc_90/ECCOv4/Release4/nctiles_daily/THETA/{day1.year:4}/{day1.timetuple().tm_yday:03}/THETA_{day1.year:4}_{day1.month:02}_{day1.day:02}.nc'
                         print('Downloading data!')
                         print(url)
                         r = requests.get(url, allow_redirects=True)
-                        open(f'{head}theta/daily/download_THETA_{day1.year:4}_{day1.month:02}_{day1.day:02}.nc', 'wb').write(r.content)
-
+                        open(f'{head}nctiles_daily/theta/THETA_{day1.year:4}_{day1.month:02}_{day1.day:02}.nc', 'wb').write(r.content)
+        
             dspT2 = None
             while dspT2 is None:
                 try:
-                    dspT2 = xr.open_mfdataset(f'{head}theta/daily/*THETA_{day2.year:4}_{day2.month:02}_{day2.day:02}.nc',combine='by_coords')
+                    dspT2 = xr.open_dataset(f'{head}nctiles_daily/theta/THETA_{day2.year:4}_{day2.month:02}_{day2.day:02}.nc')
                 except:
                     url = f'https://data.nas.nasa.gov/ecco/download_data.php?file=/eccodata/llc_90/ECCOv4/Release4/nctiles_daily/THETA/{day2.year:4}/{day2.timetuple().tm_yday:03}/THETA_{day2.year:4}_{day2.month:02}_{day2.day:02}.nc'
                     print('Downloading data!')
                     print(url)
                     r = requests.get(url, allow_redirects=True)
-                    open(f'{head}theta/daily/download_THETA_{day2.year:4}_{day2.month:02}_{day2.day:02}.nc', 'wb').write(r.content)
-
+                    open(f'{head}nctiles_daily/theta/THETA_{day2.year:4}_{day2.month:02}_{day2.day:02}.nc', 'wb').write(r.content)
+                    
             if timestep != 'daily':
                 dsS1 = None
                 while dsS1 is None:
                     try:
-                        dsS1 = xr.open_mfdataset(f'{head}salt/daily/*SALT_{day1.year:4}_{day1.month:02}_{day1.day:02}.nc',combine='by_coords')
+                        dsS1 = xr.open_dataset(f'{head}nctiles_daily/salt/SALT_{day1.year:4}_{day1.month:02}_{day1.day:02}.nc')
                     except:
                         url = f'https://data.nas.nasa.gov/ecco/download_data.php?file=/eccodata/llc_90/ECCOv4/Release4/nctiles_daily/SALT/{day1.year:4}/{day1.timetuple().tm_yday:03}/SALT_{day1.year:4}_{day1.month:02}_{day1.day:02}.nc'
                         print('Downloading data!')
                         print(url)
                         r = requests.get(url, allow_redirects=True)
-                        open(f'{head}salt/daily/download_SALT_{day1.year:4}_{day1.month:02}_{day1.day:02}.nc', 'wb').write(r.content)
-
+                        open(f'{head}nctiles_daily/salt/SALT_{day1.year:4}_{day1.month:02}_{day1.day:02}.nc', 'wb').write(r.content)
+         
             dsS2 = None
             while dsS2 is None:
                 try:
-                    dsS2 = xr.open_mfdataset(f'{head}salt/daily/*SALT_{day2.year:4}_{day2.month:02}_{day2.day:02}.nc',combine='by_coords')
+                    dsS2 = xr.open_dataset(f'{head}nctiles_daily/salt/SALT_{day2.year:4}_{day2.month:02}_{day2.day:02}.nc')
                 except:
                     url = f'https://data.nas.nasa.gov/ecco/download_data.php?file=/eccodata/llc_90/ECCOv4/Release4/nctiles_daily/SALT/{day2.year:4}/{day2.timetuple().tm_yday:03}/SALT_{day2.year:4}_{day2.month:02}_{day2.day:02}.nc'
                     print('Downloading data!')
                     print(url)
                     r = requests.get(url, allow_redirects=True)
-                    open(f'{head}salt/daily/download_SALT_{day2.year:4}_{day2.month:02}_{day2.day:02}.nc', 'wb').write(r.content)   
+                    open(f'{head}nctiles_daily/salt/SALT_{day2.year:4}_{day2.month:02}_{day2.day:02}.nc', 'wb').write(r.content)   
 
 
         # convert coordinates to radiuas
@@ -417,7 +419,7 @@ else:
             pTkze = np.empty([nxk, nze])
             Skze = np.empty([nxk, nze])
         for k in range(nze):
-            if monthly:
+            if timestep == 'monthly':
                 itpu = RGI(knots, ue[:,:,k])
                 ukze[:,k] = itpu(locsk)
             else:
@@ -434,7 +436,7 @@ else:
             Skze = fillbtm(Skze,2)
         knots = ze
         for i in range(nxk):
-            if monthly:
+            if timestep == 'monthly':
                 itpu = interp1d(knots, ukze[i,:])
                 etpu = extrap1d(itpu)
                 uk[i,:] = etpu(zk)
@@ -455,7 +457,7 @@ else:
         else:
             # calculate in situ temperature
             Tk = T(pTk, Sk, lon_k.reshape((-1,1)), lat_k.reshape((-1,1)), zk.reshape((1,-1)))
-            dT = Tk-Tk_bar
+            dT = Tk-T_bar
             if vert:
                 dTtv[e,:] = np.nanmean(dT,axis=0)
                 da = xr.DataArray(dTtv,[("time", dt64_events),("z",zk)],)
@@ -463,5 +465,5 @@ else:
             if wdtau:
                 for i in range(len(frqs)):
                     dtaut[i,e] = np.nansum(KTk[i]*dT)*dxk*dzk
-                da = xr.DataArray(dtaut,[("frq",frqs,"time", dt64_events)],)
+                da = xr.DataArray(dtaut,[("frq",frqs),("time", dt64_events)],)
                 da.to_netcdf('result/dtaus_'+name+'.nc')
