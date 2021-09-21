@@ -73,180 +73,355 @@ function twavepick(eqname, tstations, tintervals, tavgwidth, treffreq, pstations
                              fmttime(pairs[j,:event1]), fmttime(pairs[j,:event2]))
       end
 
-      # files from which to read T-wave data
-      tdatafile1 = tdatafile(eqname, tstations[i], pairs[j,:event1])
-      tdatafile2 = tdatafile(eqname, tstations[i], pairs[j,:event2])
+      if ishydr(tstations[i]) || !arehydr(tstations[i])
+      
+          # files from which to read T-wave data
+          tdatafile1 = tdatafile(eqname, tstations[i], pairs[j,:event1])
+          tdatafile2 = tdatafile(eqname, tstations[i], pairs[j,:event2])
+          # check whether all data is present
+          if !isfile(tdelayfile) && isfile(tdatafile1) && isfile(tdatafile2)
+    
+            if ishydr(tstations[i])
+    
+              # station location
+              stalat, stalon = 19.71786, 166.90986 #DataFrame(CSV.File(tstationlocfile(tstations[i])))[1,:]
+    
+            else
+    
+              # station location
+              stalat, stalon = h5read(tdatafile1, "latitude"), h5read(tdatafile2, "longitude")
+    
+            end
+    
+            # estimate travel time from geodetic distance
+            evtmagmin = min(pairs[j,:magnitude1],pairs[j,:magnitude2])
+            evtlat = .5(pairs[j,:latitude1] + pairs[j,:latitude2])
+            evtlon = .5(pairs[j,:longitude1] + pairs[j,:longitude2])
+            range = dist(evtlon, evtlat, stalon, stalat)
+            traveltime = range/soundspeed
+    
+            if ishydr(tstations[i])
+    
+              # load both waveforms
+              trace1 = read_sac(tdatafile1)
+              trace2 = read_sac(tdatafile2)
+    
+              # sampling interval
+              Δ1 = trace1.delta
+              Δ2 = trace2.delta
+    
+              # first times in files
+              starttime1 = trace1.evt.time + Microsecond(Int(round(trace1.b*1e6)))
+              starttime2 = trace2.evt.time + Microsecond(Int(round(trace2.b*1e6)))
+    
+              # extract signals
+              s1 = Float64.(trace1.t)
+              s2 = Float64.(trace2.t)
+    
+            else
+              
+              # open files
+              fid1 = h5open(tdatafile1, "r")
+              fid2 = h5open(tdatafile2, "r")
+              
+              try
+                # sampling interval
+                Δ1 = read(fid1, "fs")^-1
+                Δ2 = read(fid2, "fs")^-1
+              catch y
+                @printf("no frequency recorded\n")
+                continue
+              end
+              
+              # extract signals
+              s1 = read(fid1, "trace")
+              s2 = read(fid2, "trace")
+    
+              # first times in files
+              starttime1 = DateTime(1970, 1, 1) + Microsecond(read(fid1, "starttime"))
+              starttime2 = DateTime(1970, 1, 1) + Microsecond(read(fid2, "starttime"))
+    
+              # close files
+              close(fid1)
+              close(fid2)
+    
+            end
+    
+            # average sampling interval
+            Δ = (Δ1 + Δ2)/2
+    
+            # lengths of traces
+            N1 = length(s1)
+            N2 = length(s2)
+    
+            # times of samples
+            time1 = starttime1 .+ Microsecond.(Int.(round.((0:N1-1)*Δ1*1e6)))
+            time2 = starttime2 .+ Microsecond.(Int.(round.((0:N2-1)*Δ2*1e6)))
+    
+            # convert time of samples to seconds since event time
+            time1 = Dates.value.(time1 .- pairs[j,:event1])/1e3
+            time2 = Dates.value.(time2 .- pairs[j,:event2])/1e3
+    
+            # find first index of window
+            i1 = findfirst(traveltime + tintervals[i][1] .< time1)
+            i2 = findfirst(traveltime + tintervals[i][1] .< time2)
+    
+            # window length
+            n1 = Int(round((tintervals[i][2] - tintervals[i][1])/Δ1))
+            n2 = Int(round((tintervals[i][2] - tintervals[i][1])/Δ2))
+    
+            # check whether time series are long enough and window has same length
+            if !isnothing(i1) && !isnothing(i2) && i1 + n1 - 1 ≤ N1 && i2 + n2 - 1 ≤ N2 && n1 == n2
+    
+              # sample length
+              n = n1
+    
+              # make sure sample length is even
+              (mod(n, 2) == 1) && (n -= 1)
+    
+              # cut signals
+              s1 = s1[i1:i1+n-1]
+              s2 = s2[i2:i2+n-1]
+    
+              # remove means
+              s1 .-= mean(s1)
+              s2 .-= mean(s2)
+    
+              # Hann window
+              hann = .5*(1 .- cos.(2π*(1:n)/n))
+    
+              # Fourier transform
+              st1 = rfft(hann.*s1)
+              st2 = rfft(hann.*s2)
+    
+              # sample frequencies
+              ω = (0:n÷2)/(n*Δ)
+    
+              # Gaussian for freq. averages
+              G = exp.(-(ω.-tfreq').^2/2tavgwidth^2)
+    
+              # filter
+              st1f = st1.*G
+              st2f = st2.*G
+    
+              # normalization
+              norm1 = (abs.(st1f[1,:]).^2 + 2sum(abs.(st1f[2:n÷2,:]).^2, dims=1)[1,:]
+                       + abs.(st1f[n÷2+1,:]).^2)/n
+              norm2 = (abs.(st2f[1,:]).^2 + 2sum(abs.(st2f[2:n÷2,:]).^2, dims=1)[1,:]
+                       + abs.(st2f[n÷2+1,:]).^2)/n
+    
+              # cross-correlation function
+              cc = circshift(irfft(conj(st1f).*st2f, n, 1)./sqrt.(norm1.*norm2)', (n÷2, 0))
+    
+              # offsets
+              lags = collect(-n÷2:n÷2-1)*Δ
+    
+              # correct for difference in initial times
+              lags .+= time2[i2] - time1[i1]
+    
+              # pick max CC and adjacent max
+              Δτl, Δτc, Δτr, ccc, ccr, ccl = findmaxcc(cc, tfreq, lags, treffreq, 1/Δ)
+              i0 = argmin(abs.(tfreq .- treffreq))
+    
+              # save figure if CC ≥ 0.6
+              if saveplot && ccc[i0] ≥ 0.6
+                fig = figure()
+                imshow(cc', cmap="RdBu_r", vmin=-1, vmax=1, origin="lower", aspect="auto",
+                       extent=[lags[1] - Δ/2, lags[end] + Δ/2, tfreq[1] - .5(tfreq[2]-tfreq[1]),
+                               tfreq[end] + .5(tfreq[end]-tfreq[end-1])])
+                plot(Δτl, tfreq, color="black")
+                plot(Δτc, tfreq, color="black")
+                plot(Δτr, tfreq, color="black")
+                xlim(Δτc[i0]-1, Δτc[i0]+1)
+                xlabel("lag (s)")
+                ylabel("frequency (Hz)")
+                savefig(tplotfile, dpi=200)
+                close(fig)
+                
+                designmethod = Butterworth(4)
+                responsetype = Bandpass(treffreq-tavgwidth, treffreq+tavgwidth; fs=Int(round(1/Δ)))
+                s1plt = filtfilt(digitalfilter(responsetype, designmethod), s1)
+                s2plt = filtfilt(digitalfilter(responsetype, designmethod), s2)
+                tplt = (0:n-1)*Δ
+                fig, ax = subplots(1, 1)
+                ax.plot(tplt, s1plt, color="black", alpha=0.75, label=string("event1,M",pairs[j,:magnitude1]))#,",cs",@sprintf("%.0f",cs1)))
+                ax.plot(tplt, s2plt, color="red", alpha=0.75, label=string("event2,M",pairs[j,:magnitude2]))#,",cs",@sprintf("%.0f",cs2)))
+                ax.legend(frameon=false, loc=4)
+                ax.set_xlabel("time (s)")
+                ax.set_ylabel("absolute amplitude")
+                fig.savefig(string(tplotfile[1:end-4],"waveform.pdf"), dpi=200)
+                close(fig)
+              end
 
-      # check whether all data is present
-      if !isfile(tdelayfile) && isfile(tdatafile1) && isfile(tdatafile2)
-
-        if ishydr(tstations[i])
-
-          # station location
-          stalat, stalon = DataFrame(CSV.File(tstationlocfile(tstations[i])))[1,:]
-
-        else
-
-          # station location
-          stalat, stalon = h5read(tdatafile1, "latitude"), h5read(tdatafile2, "longitude")
-
-        end
-
-        # estimate travel time from geodetic distance
-        evtlat = .5(pairs[j,:latitude1] + pairs[j,:latitude2])
-        evtlon = .5(pairs[j,:longitude1] + pairs[j,:longitude2])
-        range = dist(evtlon, evtlat, stalon, stalat)
-        traveltime = range/soundspeed
-
-        if ishydr(tstations[i])
-
-          # load both waveforms
-          trace1 = read_sac(tdatafile1)
-          trace2 = read_sac(tdatafile2)
-
-          # sampling interval
-          Δ1 = trace1.delta
-          Δ2 = trace2.delta
-
-          # first times in files
-          starttime1 = trace1.evt.time + Microsecond(Int(round(trace1.b*1e6)))
-          starttime2 = trace2.evt.time + Microsecond(Int(round(trace2.b*1e6)))
-
-          # extract signals
-          s1 = Float64.(trace1.t)
-          s2 = Float64.(trace2.t)
-
-        else
-
-          # open files
-          fid1 = h5open(tdatafile1, "r")
-          fid2 = h5open(tdatafile2, "r")
-
-          # sampling interval
-          Δ1 = read(fid1, "fs")^-1
-          Δ2 = read(fid2, "fs")^-1
-
-          # extract signals
-          s1 = read(fid1, "trace")
-          s2 = read(fid2, "trace")
-
-          # first times in files
-          starttime1 = DateTime(1970, 1, 1) + Microsecond(read(fid1, "starttime"))
-          starttime2 = DateTime(1970, 1, 1) + Microsecond(read(fid2, "starttime"))
-
-          # close files
-          close(fid1)
-          close(fid2)
-
-        end
-
-        # average sampling interval
-        Δ = (Δ1 + Δ2)/2
-
-        # lengths of traces
-        N1 = length(s1)
-        N2 = length(s2)
-
-        # times of samples
-        time1 = starttime1 .+ Microsecond.(Int.(round.((0:N1-1)*Δ1*1e6)))
-        time2 = starttime2 .+ Microsecond.(Int.(round.((0:N2-1)*Δ2*1e6)))
-
-        # convert time of samples to seconds since event time
-        time1 = Dates.value.(time1 .- pairs[j,:event1])/1e3
-        time2 = Dates.value.(time2 .- pairs[j,:event2])/1e3
-
-        # find first index of window
-        i1 = findfirst(traveltime + tintervals[i][1] .< time1)
-        i2 = findfirst(traveltime + tintervals[i][1] .< time2)
-
-        # window length
-        n1 = Int(round((tintervals[i][2] - tintervals[i][1])/Δ1))
-        n2 = Int(round((tintervals[i][2] - tintervals[i][1])/Δ2))
-
-        # check whether time series are long enough and window has same length
-        if !isnothing(i1) && !isnothing(i2) && i1 + n1 - 1 ≤ N1 && i2 + n2 - 1 ≤ N2 && n1 == n2
-
-          # sample length
-          n = n1
-
-          # make sure sample length is even
-          (mod(n, 2) == 1) && (n -= 1)
-
-          # cut signals
-          s1 = s1[i1:i1+n-1]
-          s2 = s2[i2:i2+n-1]
-
-          # remove means
-          s1 .-= mean(s1)
-          s2 .-= mean(s2)
-
-          # Hann window
-          hann = .5*(1 .- cos.(2π*(1:n)/n))
-
-          # Fourier transform
-          st1 = rfft(hann.*s1)
-          st2 = rfft(hann.*s2)
-
-          # sample frequencies
-          ω = (0:n÷2)/(n*Δ)
-
-          # Gaussian for freq. averages
-          G = exp.(-(ω.-tfreq').^2/2tavgwidth^2)
-
-          # filter
-          st1f = st1.*G
-          st2f = st2.*G
-
-          # normalization
-          norm1 = (abs.(st1f[1,:]).^2 + 2sum(abs.(st1f[2:n÷2,:]).^2, dims=1)[1,:]
-                   + abs.(st1f[n÷2+1,:]).^2)/n
-          norm2 = (abs.(st2f[1,:]).^2 + 2sum(abs.(st2f[2:n÷2,:]).^2, dims=1)[1,:]
-                   + abs.(st2f[n÷2+1,:]).^2)/n
-
-          # cross-correlation function
-          cc = circshift(irfft(conj(st1f).*st2f, n, 1)./sqrt.(norm1.*norm2)', (n÷2, 0))
-
-          # offsets
-          lags = collect(-n÷2:n÷2-1)*Δ
-
-          # correct for difference in initial times
-          lags .+= time2[i2] - time1[i1]
-
-          # pick max CC and adjacent max
-          Δτl, Δτc, Δτr, ccc, ccr, ccl = findmaxcc(cc, tfreq, lags, treffreq, 1/Δ)
-          i0 = argmin(abs.(tfreq .- treffreq))
-
-          @printf("CC = %4.2f\n", ccc[i0])
-
-          # save figure if CC ≥ 0.6
-          if saveplot && ccc[i0] ≥ 0.6
-            fig = figure()
-            imshow(cc', cmap="RdBu_r", vmin=-1, vmax=1, origin="lower", aspect="auto",
-                   extent=[lags[1] - Δ/2, lags[end] + Δ/2, tfreq[1] - .5(tfreq[2]-tfreq[1]),
-                           tfreq[end] + .5(tfreq[end]-tfreq[end-1])])
-            plot(Δτl, tfreq, color="black")
-            plot(Δτc, tfreq, color="black")
-            plot(Δτr, tfreq, color="black")
-            xlim(Δτc[i0]-1, Δτc[i0]+1)
-            xlabel("lag (s)")
-            ylabel("frequency (Hz)")
-            savefig(tplotfile, dpi=200)
-            close(fig)
+              # save to file
+              h5open(tdelayfile, "w") do fid
+                write(fid, "freq", collect(tfreq))
+                write(fid, "Δτl", Δτl)
+                write(fid, "Δτc", Δτc)
+                write(fid, "Δτr", Δτr)
+                write(fid, "ccc", ccc)
+                write(fid, "ccr", ccr)
+                write(fid, "ccl", ccl)
+              end
+    
+            end
+    
           end
+          
+      elseif arehydr(tstations[i])
+          stalats = [19.71356,19.73115,19.71786]
+          stalons = [166.89109,166.89677,166.90986]
+          global getdata = 0
+          for nstn = 1 : 3
+              # files from which to read T-wave data
+              tdatafile1 = tdatafile(eqname, string(tstations[i], string(nstn)), pairs[j,:event1])
+              tdatafile2 = tdatafile(eqname, string(tstations[i], string(nstn)), pairs[j,:event2])
+              # check whether all data is present
+              if !isfile(tdelayfile) && isfile(tdatafile1) && isfile(tdatafile2)
+                # station location
+                stalat, stalon = stalats[i], stalons[i]
+                # estimate travel time from geodetic distance
+                evtlat = .5(pairs[j,:latitude1] + pairs[j,:latitude2])
+                evtlon = .5(pairs[j,:longitude1] + pairs[j,:longitude2])
+                range = dist(evtlon, evtlat, stalon, stalat)
+                traveltime = range/soundspeed
+                
+                # load both waveforms
+                trace1 = read_sac(tdatafile1)
+                trace2 = read_sac(tdatafile2)
+                
+                # sampling interval
+                Δ1 = trace1.delta
+                Δ2 = trace2.delta
+                
+                # first times in files
+                starttime1 = trace1.evt.time + Microsecond(Int(round(trace1.b*1e6)))
+                starttime2 = trace2.evt.time + Microsecond(Int(round(trace2.b*1e6)))
+                
+                # extract signals
+                s1 = Float64.(trace1.t)
+                s2 = Float64.(trace2.t)
+                # average sampling interval
+                Δ = (Δ1 + Δ2)/2
+                
+                # lengths of traces
+                N1 = length(s1)
+                N2 = length(s2)
+                
+                # times of samples
+                time1 = starttime1 .+ Microsecond.(Int.(round.((0:N1-1)*Δ1*1e6)))
+                time2 = starttime2 .+ Microsecond.(Int.(round.((0:N2-1)*Δ2*1e6)))
+                
+                # convert time of samples to seconds since event time
+                time1 = Dates.value.(time1 .- pairs[j,:event1])/1e3
+                time2 = Dates.value.(time2 .- pairs[j,:event2])/1e3
+                
+                # find first index of window
+                i1 = findfirst(traveltime + tintervals[i][1] .< time1)
+                i2 = findfirst(traveltime + tintervals[i][1] .< time2)
+                
+                # window length
+                n1 = Int(round((tintervals[i][2] - tintervals[i][1])/Δ1))
+                n2 = Int(round((tintervals[i][2] - tintervals[i][1])/Δ2))
+                
+                # check whether time series are long enough and window has same length
+                if !isnothing(i1) && !isnothing(i2) && i1 + n1 - 1 ≤ N1 && i2 + n2 - 1 ≤ N2 && n1 == n2
+                    global getdata += 1
 
-          # save to file
-          h5open(tdelayfile, "w") do fid
-            write(fid, "freq", collect(tfreq))
-            write(fid, "Δτl", Δτl)
-            write(fid, "Δτc", Δτc)
-            write(fid, "Δτr", Δτr)
-            write(fid, "ccc", ccc)
-            write(fid, "ccr", ccr)
-            write(fid, "ccl", ccl)
+                    # sample length
+                    n = n1
+                    
+                    # make sure sample length is even
+                    (mod(n, 2) == 1) && (n -= 1)
+                    
+                    # cut signals
+                    s1 = s1[i1:i1+n-1]
+                    s2 = s2[i2:i2+n-1]
+                    
+                    # remove means
+                    s1 .-= mean(s1)
+                    s2 .-= mean(s2)
+                    
+                    n = length(s1)
+                    
+                    # Hann window
+                    hann = .5*(1 .- cos.(2π*(1:n)/n))
+        
+                    # Fourier transform
+                    st1 = rfft(hann.*s1)
+                    st2 = rfft(hann.*s2)
+        
+                    # sample frequencies
+                    ω = (0:n÷2)/(n*Δ)
+        
+                    # Gaussian for freq. averages
+                    G = exp.(-(ω.-tfreq').^2/2tavgwidth^2)
+        
+                    # filter
+                    st1f = st1.*G
+                    st2f = st2.*G
+        
+                    # normalization
+                    norm1 = (abs.(st1f[1,:]).^2 + 2sum(abs.(st1f[2:n÷2,:]).^2, dims=1)[1,:]
+                             + abs.(st1f[n÷2+1,:]).^2)/n
+                    norm2 = (abs.(st2f[1,:]).^2 + 2sum(abs.(st2f[2:n÷2,:]).^2, dims=1)[1,:]
+                             + abs.(st2f[n÷2+1,:]).^2)/n
+        
+                    # cross-correlation function
+                    cc = irfft(conj(st1f).*st2f, n, 1)./sqrt.(norm1.*norm2)'
+                    
+                    if getdata == 1
+                      global oldfreq = 1/Δ
+                      global cca = circshift(cc, (n÷2, 0))
+                      global lagsold = collect(-n÷2:n÷2-1)*Δ .+ (time2[i2] - time1[i1])
+                    else
+                      ccnew = circshift(cc, (n÷2, 0))
+                      global lagsnew = collect(-n÷2:n÷2-1)*Δ .+ (time2[i2] - time1[i1])
+                      knots = (lagsnew,)
+                      for nf = 1:length(tfreq)
+                        itpc = interpolate(knots, ccnew[:,nf], Gridded(Constant()))
+                        etpc = extrapolate(itpc, Flat())
+                        cca[:,nf] .+= etpc.(lagsold)
+                      end
+                    end
+
+                end
+              end 
           end
-
-        end
-
+          if getdata > 0
+              # pick max CC and adjacent max
+              Δτl, Δτc, Δτr, ccc, ccr, ccl = findmaxcc(cca, tfreq, lagsold, treffreq, oldfreq)
+              i0 = argmin(abs.(tfreq .- treffreq))
+    
+              # save figure if CC ≥ 0.6
+              if saveplot && ccc[i0] ≥ 0.6*getdata/sqrt(getdata)
+                fig = figure()
+                imshow(cca', cmap="RdBu_r", vmin=-3, vmax=3, origin="lower", aspect="auto",
+                       extent=[lagsold[1] - Δ/2, lagsold[end] + Δ/2, tfreq[1] - .5(tfreq[2]-tfreq[1]),
+                       tfreq[end] + .5(tfreq[end]-tfreq[end-1])])
+                plot(Δτl, tfreq, color="black")
+                plot(Δτc, tfreq, color="black")
+                plot(Δτr, tfreq, color="black")
+                xlim(Δτc[i0]-1, Δτc[i0]+1)
+                xlabel("lag (s)")
+                ylabel("frequency (Hz)")
+                plt.colorbar()
+                fig.tight_layout()
+                savefig(tplotfile, dpi=200)
+                close(fig)
+              end
+    
+              # save to file
+              h5open(tdelayfile, "w") do fid
+                write(fid, "freq", collect(tfreq))
+                write(fid, "Δτl", Δτl)
+                write(fid, "Δτc", Δτc)
+                write(fid, "Δτr", Δτr)
+                write(fid, "ccc", ccc)
+                write(fid, "ccr", ccr)
+                write(fid, "ccl", ccl)
+              end       
+          end
       end
 
     end
@@ -372,6 +547,9 @@ end
 
 "Check if station is a CTBTO hydrophone station"
 ishydr(station) = occursin(r"H[0,1][1-9][E,W,N,S][1-3]", station)
+
+"Check if station is a 3-in-1 CTBTO hydrophone station"
+arehydr(station) = occursin(r"H[0,1][1-9][E,W,N,S]", station)
 
 function tdatafile(eqname, station, date)
   if ishydr(station)
