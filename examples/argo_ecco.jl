@@ -1,43 +1,47 @@
-# TODO:
-# - Check why ARGO time series is biased to negative anomalies.
-# - Add general interpolation method for ECCO beyond Indian Ocean.
-# - Add subjective mapping choice from ARGO floats.
+### ECCO/RG Clim estimate calculation
 
 using PyCall, DelimitedFiles, Dates, NCDatasets, Printf, Statistics, Interpolations, PyPlot, ProgressBars,HDF5
+np = pyimport("numpy")
 gsw = pyimport("gsw")
 gcc = pyimport("great_circle_calculator.great_circle_calculator")
+cmo = pyimport("cmocean.cm")
 
-data = "argo"      # data source from ARGO or ECCO
-date = "Jul11"     # Date of computation
+const earthradius = 6371e3
+const p10 = ((166.90986,19.71786) .+ (166.89109,19.71356) .+ (166.89677,19.73115))./3
+
+data = "ecco"      # data source from Argo, RGClim or ECCO
+date = "Sep14"     # Date of computation
 timestep = "month" # time series in every month, day, or t-wave event
-getref = false     # compute reference state (S,T) from ECCO
+getcrho = true
+getref = true      # compute reference state (S,T) from ECCO
 getKTs = false     # save 2D temperature kernel profiles
-getanl = true      # compute travel time anomaly estimate from ARGO or ECCO
-missdeep = true    # ignore deep extrapolation below 2km for ARGO
-plot = true        # plot intersection profiles
+getanl = false      # compute travel time anomaly estimate from ARGO or ECCO
+missdeep = false    # ignore deep extrapolation below 2km for ARGO
+plot = false        # plot intersection profiles
 
 # all events
-if data == "argo"
+if data == "rgclim"
     events = Date(2004,1,16):Month(1):Date(2018,12,16)
 elseif data == "ecco"
     if timestep == "month"
-        events = Date(2005,1):Month(1):Date(2016,12)
+        events = Date(2008,1):Month(1):Date(2017,12)
     elseif timestep == "day"
         events = DateTime(2008, 03, 01, 12):Day(1):DateTime(2008, 03, 10, 12)
     end
 end
 
 # start-end of path
-name = "H08S2"
+name = "H11N3"
+nend = "jpn39"
 
 # frequency/ies 
 #frq = ["2.5Hz","3.25Hz","4Hz"]
 frq = ["2Hz","3Hz","4Hz"]
 
 # start and end of path
-xmink = -100e3
-xmaxk = 3000e3
-zmink = -6500.
+xmink = -300e3
+xmaxk = 3500e3
+zmink = -8000.
 zmaxk = 0.
 
 # kernel grid spacing
@@ -46,9 +50,9 @@ zmaxk = 0.
 
 # kernel end points
 #p10 = (114.1361, -34.8832) 
-p10 = (72.49, -7.65)
+#p10 = (166.90986,19.71786)#(72.49, -7.65)
 #p20 = (96.8, 1.) 
-p20 = (97.0, 1.65)
+p20 = (142.11, 39) #(97.0, 1.65) (142.11,39) (140.57,37)
 d0 = gcc.distance_between_points(p10, p20, unit="meters")
 crs1 = gcc.bearing_at_p1(p10, p20)
 crs2 = gcc.bearing_at_p1(p20, p10)
@@ -70,11 +74,14 @@ function filledges!(a)
 end
 
 # fill in coastal and bottom points (ignores points at the edge of the array)
-function filledgesxy!(a)
+function filledgesxz!(a)
   # fill in all points that have a missing value with the average of the eight surrounding points (if there are any values there)
-  nx, ny = size(a)
-  a[2:nx-1,2:ny-1] = [ismissing(a[i,j]) & !all(ismissing.(a[i-1:i+1,j-1:j+1])) ? mean(skipmissing(a[i-1:i+1,j-1:j+1])) :
-                           a[i,j] for i = 2:nx-1, j = 2:ny-1]
+  nx, nz = size(a)
+  a[2:nx-1,1:nz-1] = [ismissing(a[i,k]) & !all(ismissing.(a[i-1:i+1,k:k+1])) ? mean(skipmissing(a[i-1:i+1,k:k+1])) :
+                      a[i,k] for i = 2:nx-1, k = 1:nz-1]
+                      
+  # fill in bottom points
+  a[:,1:nz-1] = [ismissing(a[i,k]) & !ismissing(a[i,k+1]) ? a[i,k+1] : a[i,k] for i = 1:nx, k = 1:nz-1]
 end
 
 # fill in bottom points along the path
@@ -157,6 +164,27 @@ function dcdT(t, S, λ, θ, z)
   end
 end
 
+function getJP(ds,var;ll=false)
+  λe = ds["XC"][:,:,6]
+  θe = ds["YC"][:,:,6]
+  idx = intersect(findall(x->x>120, λe),findall(x->50>x>10, θe))
+  λjp1 = unique(λe[idx])
+  θjp = unique(θe[idx])
+  dt1 = Array{Union{Missing, Float64}}(ds[var][unique([x[1] for x in idx]),unique([x[2] for x in idx]),6,:,1])[:,:,end:-1:1]; dt1[dt1.==0] .= missing
+  λe = ds["XC"][:,:,8]
+  θe = ds["YC"][:,:,8]
+  idx = intersect(findall(x->x>120, λe),findall(x->50>x>10, θe))
+  λjp2 = unique(λe[idx])
+  λjp = vcat(λjp1,λjp2) 
+  dt2 = Array{Union{Missing, Float64}}(ds[var][unique([x[1] for x in idx]),unique([x[2] for x in idx]),8,:,1])[end:-1:1,:,end:-1:1]; dt2[dt2.==0] .= missing
+  dt = vcat(dt1,permutedims(dt2, [2, 1, 3]))
+  if ll == true
+    return λjp,θjp,dt
+  else
+    return dt
+  end
+end
+
 # kernel coordinates
 xk = xmink : Δxk : xmaxk
 zk = zmink : Δzk : zmaxk
@@ -213,7 +241,7 @@ if getKTs
     close(ds)
 end
 
-if data == "argo"
+if data == "rgclim"
     head = "/central/groups/oceanphysics/shirui/argo/"
     dsTa = Dataset(@sprintf("%stemp/RG_ArgoClim_Temperature_2019.nc", head))
     #dsSa = Dataset(@sprintf("%sRG_ArgoClim_Salinity_2019.nc", head))
@@ -239,12 +267,13 @@ let
         global T̄
         Δτ = Array{Union{Missing, Float64}}(undef, length(events),size(frq,1))
     end
-    if getref
+    if getref || getcrho
         Θsum = zeros(Union{Missing, Float64},nxk, nzk)
         Ssum = zeros(Union{Missing, Float64},nxk, nzk)
     end
+    @printf("Interpolation begin...\n")
     for (e, event) in enumerate(tqdm(events))
-        if data == "argo"
+        if data == "rgclim"
             Te = T̄a .+ ΔTa[:,:,:,e]
             #Sa = permutedims(S̄a .+ ΔSa[e],[3,2,1])
             # ECCO data array size
@@ -309,14 +338,20 @@ let
                 Θe = w1*Θ1 + w2*Θ2
                 Se = w1*S1 + w2*S2
             else
-                # convert coordinates to radiuas
-                λe = dsΘ["XC"][:,:,5]
-                θe = dsΘ["YC"][:,:,5]
                 # reverse depth coordinate
                 ze = Array(dsΘ["Z"])[end:-1:1]
                 # mask missing data and reverse depth coordinate
-                Θe = Array{Union{Missing, Float64}}(dsΘ["THETA"][:,:,5,:,1])[:,:,end:-1:1]; Θe[Θe.==0] .= missing
-                Se = Array{Union{Missing, Float64}}(dsS["SALT"][:,:,5,:,1])[:,:,end:-1:1]; Se[Se.==0] .= missing
+                if name[1:3] == "H11"
+                    @printf("Japan interpolation for %s\n",event)
+                    λe,θe,Θe = getJP(dsΘ,"THETA";ll=true)
+                    Se = getJP(dsS,"SALT")
+                else
+                    # coordinates
+                    λe = dsΘ["XC"][:,1,5]
+                    θe = dsΘ["YC"][1,:,5]
+                    Θe = Array{Union{Missing, Float64}}(dsΘ["THETA"][:,:,5,:,1])[:,:,end:-1:1]; Θe[Θe.==0] .= missing
+                    Se = Array{Union{Missing, Float64}}(dsS["SALT"][:,:,5,:,1])[:,:,end:-1:1]; Se[Se.==0] .= missing
+                end
             end
             # ECCO data array size
             nxe, nye, nze = size(Θe)
@@ -324,7 +359,7 @@ let
             filledges!(Θe)
             filledges!(Se)
             # interpolate horizontally onto great circle path
-            knots = (λe[:,1], θe[1,:],)
+            knots = (λe, θe,)
             Θkze = Array{Union{Missing, Float64}}(undef, nxk, nze)
             Skze = Array{Union{Missing, Float64}}(undef, nxk, nze)
             for k = 1:nze
@@ -336,8 +371,10 @@ let
                 Skze[:,k] = etpS.(λk, θk)
             end
             # fill in the bottom points
+            filledgesxz!(Θkze)
+            filledgesxz!(Skze)
             fillbottom!(Θkze)
-            fillbottom!(Skze)  
+            fillbottom!(Skze)
             # interpolate vertically onto kernel grid
             knots = (ze,)
             Θk = Array{Union{Missing, Float64}}(undef, nxk, nzk)
@@ -353,7 +390,7 @@ let
             if getanl
                 Tk = [T(Θk[i,k], Sk[i,k], λk[i], θk[i], zk[k]) for i = 1:nxk, k = 1:nzk]
             end
-            if getref
+            if getref || getcrho
                 Θsum = Θsum .+ Θk
                 Ssum = Ssum .+ Sk
             end
@@ -367,27 +404,27 @@ let
             for i = 1:size(frq,1)
                 Δτ[e,i] = sum(skipmissing(KTs[i,:,:].*ΔT))*Δxk*Δzk
             end
-            if (e == length(events) ÷ 3) && plot && (data == "argo")
+            if (e == length(events) ÷ 3) && plot && (data == "rgargo")
                 fig = figure()
                 pcolormesh(1e-3xk, zk, replace(T̄, missing=>NaN)', vmin=0, vmax=25, cmap="Reds", shading="auto")
                 plt.colorbar()
                 fig.tight_layout()
-                fig.savefig(string("result/argo_test_Tbar.pdf"))
+                fig.savefig(string("result/rgargo_test_Tbar.pdf"))
                 fig = figure()
                 pcolormesh(1e-3xk, zk, replace(asinh.(ΔT/.1), missing=>NaN)', vmin=asinh(-100), vmax=asinh(100), cmap="RdBu_r", shading="auto")
                 fig.tight_layout()
-                fig.savefig(string("result/argo_test_dT.pdf"))
+                fig.savefig(string("result/rgargo_test_dT.pdf"))
                 fig = figure()
                 pcolormesh(1e-3xk, zk, replace(asinh.(KTs[1,:,:].*ΔT/1e-11), missing=>NaN)', vmin=asinh(-100), vmax=asinh(100), cmap="RdBu", shading="auto")
-                fig.savefig(string("result/argo_test_dtau.pdf"))
+                fig.savefig(string("result/rgargo_test_dtau.pdf"))
             end
         end
     end
-    
+    @printf("Interpolation finished!\n")
     if getref
-        replace!(Θsum, missing=>NaN)
+        replace!(Θsum, missing=>NaN) 
         replace!(Ssum, missing=>NaN)
-        filename = @sprintf("data/ref/ref_%s_%s.nc", name, date)
+        filename = @sprintf("data/ref/ref_%s_%s.nc", name, nend)
         ds = Dataset(filename,"c")
         
         # Define the dimension "lon" and "lat" 
@@ -400,6 +437,21 @@ let
         vT[:,:] = T.(Θsum/Float64(length(events)), Ssum/Float64(length(events)), λk, θk, zk')
         vS[:,:] = Ssum/Float64(length(events))
         close(ds)
+    end
+    if getcrho
+        T̄ = T.(Θsum/Float64(length(events)), Ssum/Float64(length(events)), λk, θk, zk')
+        S̄ = Ssum/Float64(length(events))
+        c̄ = c.(T̄, S̄, λk, θk, zk')
+        arho = rho.(T̄, S̄, λk, θk, zk')
+        filename = @sprintf("data/ref/%s_%s.txt",name,nend)
+        open(filename, "w") do io
+           write(io, @sprintf("%.2f %.2f %.2f %.2f #x_min(m) z_min(m) x_max(m) z_max(m)\n",xmink,zmink,xmaxk,zmaxk))
+           write(io, @sprintf("%.4f %.4f                #dx(m) dz(m)\n",Δxk,Δzk))
+           write(io, @sprintf("%d %d                           #nx nz\n",nxk,nzk))
+           for i = 1:nxk, k = 1:nzk
+               write(io, @sprintf("%.2f %.2f %.4f 0 %.4f\n",xk[i],abs(zk[end+1-k]),c̄[i,end+1-k],arho[i,end+1-k]))
+           end
+        end
     end
     if getanl
         filename = @sprintf("result/dtaus_%s_%s.nc", name, date)
