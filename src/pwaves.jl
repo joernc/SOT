@@ -1,6 +1,7 @@
 # TODO:
 # - Write empty file when data is missing?
 # - Prevent pairing with neighboring event?
+# - Allow for gaps!
 
 # initialize model for ray prediction
 global taup = pyimport("obspy.taup")
@@ -68,9 +69,12 @@ function downloadseisdata(eqname, stations; src="IRIS")
 
             end
 
-          end
+            @printf("done\n")
+          else
 
-          @printf("done\n")
+            @printf("%d gap(s)\n", length(S)-1)
+
+          end
 
         catch y
 

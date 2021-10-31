@@ -122,7 +122,7 @@ function collectpairs(eqname, tstations, tintervals, tavgwidth, treffreq, tinvfr
     end
 
     # add station information
-    selpairs.station = pstations[i]
+    selpairs.station = repeat([pstations[i]], size(selpairs, 1))
 
     # record
     append!(ppairs, selpairs)
@@ -173,14 +173,21 @@ R = spdiagm(0 => [σt^2*ones(l*nt); σp^2*ones(np)])
 A = P*E'
 τerr = reshape(sqrt.(diag(D*A*R*A'*D')), (m, l))
 ```
+  λ: correlation time (days)
+  σx: solution standard deviation
+  σn: measurement noise (s)
+  σp: origin time error (s)
 """
-function invert(tpairs, ppairs; timescale=NaN)
+function invert(tpairs, ppairs, λ, σx, σn, σp, U, Σ; σtrend=0, σannual=0, σsemiannual=0)
 
   # number of frequencies
   l = length(tpairs.Δτc[1])
 
   # find unique events
   t = sort(unique([tpairs.event1; tpairs.event2]))
+
+  # real time (days)
+  tr = Dates.value.(t - DateTime(2000, 1, 1, 12, 0, 0))/1000/3600/24
 
   # number of T- and P-wave pairs
   nt = size(tpairs, 1)
@@ -202,25 +209,55 @@ function invert(tpairs, ppairs; timescale=NaN)
   # full design matrix
   E = blockdiag([Xt for i = 1:l]..., Xp)
 
-  # smoothing matrix
-  tr = Dates.value.(t .- t[1])/1000/3600/24
-  Δ = isnan(timescale) ? (tr[3:m] - tr[1:m-2])/2 : timescale*ones(m-2)
-  F = spdiagm(m-2, m,
-              0 => Δ.*(tr[2:m-1] - tr[1:m-2]).^-1,
-              1 => -Δ.*((tr[2:m-1] - tr[1:m-2]).^-1 + (tr[3:m] - tr[2:m-1]).^-1),
-              2 => Δ.*(tr[3:m] - tr[2:m-1]).^-1)
-  F = [F[1,:]'; F; F[m-2,:]']
-
-  # difference matrix to get τ from T- and P-wave anomalies
+  # difference matrix (T- minus P-anomalies)
   D = [I(l*m) vcat([-I(m) for i = 1:l]...)]
 
-  # full smoothing matrix
-  S = blockdiag([F for i = 1:l]...)*D
+  # solution covariance in time
+  A = exp.(-abs.(tr.-tr')/λ)
 
-  # calculate pseudoinverse
-  P = pinv(Array(E'*E + S'*S))
+  # transformation from singular vectors to observed frequencies
+  T = kron(sparse(U*Diagonal(Σ)), I(m))
 
-  return t, E, S, P, D
+  # covariance matrix assuming no correlation between singular vectors expansion coefficients
+  Rxx = [T*kron(spdiagm(σx.^2), A)*T' zeros(l*m, m); zeros(m, (l+1)*m)] + σp^2*kron(sparse(ones(l+1, l+1)), I(m))
+
+  # add trend if desired
+  if !(σtrend == 0)
+    tm = tr[1]+(tr[m]-tr[1])/2
+    E = [E E*[kron(I(l), tr.-tm); zeros(m, 3)]]
+    T = U*Diagonal(Σ)
+    Rxx = [Rxx zeros(size(Rxx, 1), l); zeros(l, size(Rxx, 2)) T*spdiagm(σtrend.^2)*T']
+    D = [D kron(I(l), tr.-tm)]
+  end
+
+  # add annual cycle if desired
+  if !(σannual == 0)
+    ω = 2π/365.2425
+    E = [E E[:,1:l*m]*[kron(I(l), cos.(ω*tr)) kron(I(l), sin.(ω*tr))]]
+    Rxx = [Rxx zeros(size(Rxx, 1), 2l); zeros(2l, size(Rxx, 2)) kron(I(2), T*spdiagm(σannual.^2/2)*T')]
+    D = [D kron(I(l), cos.(ω*tr)) kron(I(l), sin.(ω*tr))]
+  end
+
+  # add semi-annual cycle if desired
+  if !(σsemiannual == 0)
+    ω = 2π/365.2425
+    E = [E E[:,1:l*m]*[kron(I(l), cos.(2ω*tr)) kron(I(l), sin.(2ω*tr))]]
+    Rxx = [Rxx zeros(size(Rxx, 1), 2l); zeros(2l, size(Rxx, 2)) kron(I(2), T*spdiagm(σannual.^2/2)*T')]
+    D = [D kron(I(l), cos.(2ω*tr)) kron(I(l), sin.(2ω*tr))]
+  end
+
+  # noise covariance
+  Rnn = σn^2*I
+
+  # Gauss–Markov solution covariance matrix
+  P = inv(inv(Array(Rxx)) + E'*inv(Rnn)*E)
+
+  # Best estimate, subtracting T- and P-delays, adding trend and seasonal cycles:
+  #   τ = D*P*E'*inv(Rnn)*y
+  # Uncertainty:
+  #   e = sqrt.(diag(D*P*D'))
+
+  return t, E, Rxx, Rnn, P, D
 
 end
 
@@ -231,17 +268,10 @@ Find cycle-skipping corrections. Applies corrections to adjacent maxima of the
 cross-correlation function whenever they reduce the cost function. Returns the corrected
 *T*-wave delays `Δτ`.
 """
-function correctcycleskipping(tpairs, ppairs, E, S, P)
+function correctcycleskipping(tpairs, ppairs, E, Rxx, Rnn, P, m)
   
-  # residual operator
-  H = E*P*E'
-  K = S*P*E'
-
   # number of frequencies
   l = length(tpairs.Δτc[1])
-
-  # number of unique events
-  m = size(E, 2)÷(l+1)
 
   # number of T- and P-wave pairs
   nt = size(tpairs, 1)
@@ -257,7 +287,7 @@ function correctcycleskipping(tpairs, ppairs, E, S, P)
   # use Gaussian mixture model with three members and shared covariance to find three
   # clusters of pairs, estimate parameters using an EM algorithm, perform initial cycle-
   # skipping correction by shifting left cluster to right and right cluster to left
-  x1 = [tpairs.Δτc[i][1] - Δτp[i,1] for i = 1:nt]
+  x1 = [tpairs.Δτc[i][1] - Δτp[i] for i = 1:nt]
   x2 = [tpairs.Δτc[i][1] - tpairs.Δτc[i][l] for i = 1:nt]
   x = [x1 x2]
   μ = [1 0.1; 0 0; -1 -0.1]
@@ -283,12 +313,31 @@ function correctcycleskipping(tpairs, ppairs, E, S, P)
   ax[1].set_ylabel("differential delay (s)")
   ax[1].set_title("after clustering")
 
+  for i = 1:nt
+    if cs[i] != 2
+      s = @sprintf("%s %s\n", tpairs.event1[i], tpairs.event2[i])
+      printstyled(s, color=(cs[i]==1) ? :blue : :green)
+    end
+  end
+
   # data vector using initial correction
   y = [reshape([Δτa[i,j,cs[i]] for i = 1:nt, j = 1:l], l*nt); ppairs.Δτ]
 
+  # inverses
+  iRnn = inv(Rnn)
+  iRxx = inv(Array(Rxx))
+
+  # solution operator (x̃ = Ay)
+  A = P*E'*iRnn
+
+#  # residual operator
+#  R = I - E*A
+
   # initial residuals and cost
-  r = (y - H*y).^2
-  J = .5sum(r) + .5sum((K*y).^2)
+  x = A*y
+  n = y - E*x
+  r = n.^2
+  J = .5n'*iRnn*n + .5x'*iRxx*x
 
   # cycle through T-wave pairs until no further corrections are made
   i = 1
@@ -322,8 +371,10 @@ function correctcycleskipping(tpairs, ppairs, E, S, P)
         y[idx[i].+(0:l-1)*nt] = Δτa[idx[i],:,j]
 
         # new residuals and cost
-        rp = (y - H*y).^2
-        Jp = .5sum(rp) + .5sum((K*y).^2)
+        x = A*y
+        n = y - E*x
+        rp = n.^2
+        Jp = .5n'*iRnn*n + .5x'*iRxx*x
 
         # record if cost is reduced, revert otherwise
         if Jp < J
@@ -352,6 +403,9 @@ function correctcycleskipping(tpairs, ppairs, E, S, P)
   @printf("Number of pairs corrected to right max.: %4d\n", sum(cs.==3))
 
   # plot clusters used for initial correction
+  x1 = [tpairs.Δτc[i][1] - Δτp[i] for i = 1:nt]
+  x2 = [tpairs.Δτc[i][1] - tpairs.Δτc[i][l] for i = 1:nt]
+  x = [x1 x2]
   for i = 1:3
     ax[2].scatter(x[cs.==i,1], x[cs.==i,2], s=5)
   end

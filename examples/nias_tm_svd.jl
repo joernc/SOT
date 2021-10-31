@@ -246,6 +246,48 @@ axr.set_ylabel("temperature anomaly (K)")
 fig.align_ylabels()
 fig.tight_layout()
 
+# plot H08 timeseries (zoomed in)
+colors = matplotlib.rcParams["axes.prop_cycle"].by_key()["color"]
+fig, ax = subplots(3, 1, figsize=(190/25.4, 190/25.4), sharex=true)
+ax[1].plot(tg08, τg08[:,1], color="tab:blue", linewidth=1, zorder=1, label=L"$T$ waves")
+ax[1].scatter(t08, τ08[:,1], s=1, c="tab:blue", zorder=1)
+ax[1].fill_between(tg08, τg08[:,1] - 2τerrg08[:,1], τg08[:,1] + 2τerrg08[:,1], alpha=.25,
+                   color="tab:blue", linewidths=0, zorder=1)
+ax[2].plot(tg08, δτg08[:,l-1], color="tab:blue", linewidth=1, zorder=1, label=L"$T$ waves")
+ax[2].scatter(t08, δτ08[:,l-1], s=1, color="tab:blue", zorder=1)
+ax[2].fill_between(tg08, δτg08[:,l-1] - 2δτerrg08[:,l-1], δτg08[:,l-1] + 2δτerrg08[:,l-1], alpha=.25,
+                   color="tab:blue", linewidths=0, zorder=1)
+ax[1].plot(tg08, τargog08[:,1], color="tab:orange", linewidth=1, zorder=0, label="Argo")
+ax[1].plot(tg08, τeccog08[:,1], color="tab:green", linewidth=1, zorder=0, label="ECCO")
+ax[2].plot(tg08, τargog08[:,1] - τargog08[:,l], color="tab:orange", linewidth=1, zorder=0,
+           label="Argo")
+ax[2].plot(tg08, τeccog08[:,1] - τeccog08[:,l], color="tab:green", linewidth=1, zorder=0,
+           label="ECCO")
+idx = findall(isnan.(τg08[:,1]))
+for i = 1 : length(idx)+1
+  i0 = i == 1 ? 1 : idx[i-1]+1
+  i1 = i == length(idx)+1 ? length(t08) : idx[i]-1
+  ti = tg08[i0:i1-1] + .5(tg08[i0+1:i1] - tg08[i0:i1-1])
+  ti = [tg08[i0] - (ti[1]-tg08[i0]); ti; tg08[i1] + (tg08[i1]-ti[end])]
+  ax[3].pcolormesh(ti, depthi, T08[:,i0:i1], cmap="RdBu_r", vmin=-.11, vmax=.11)
+end
+ax[1].invert_yaxis()
+ax[1].legend(frameon=false, loc=2, ncol=3)
+ax[1].set_xlim(Date(2005, 3, 1), Date(2006, 9, 1))
+#ax[1].set_ylim(.5, -.4)
+#ax[1].set_yticks(-.4:.2:.4)
+#ax[2].set_ylim(-.125, .125)
+ax[3].set_ylim(5, 0)
+ax[1].set_ylabel("travel time anomaly (s)")
+ax[2].set_ylabel("travel time difference (s)")
+ax[3].set_ylabel("depth (km)")
+axr = ax[1].twinx()
+axr.set_yticks(-.06:.030:.06)
+axr.set_ylim(ax[1].get_ylim()./sum(K08[1,:]))
+axr.set_ylabel("temperature anomaly (K)")
+fig.align_ylabels()
+fig.tight_layout()
+
 # plot H01 timeseries
 colors = matplotlib.rcParams["axes.prop_cycle"].by_key()["color"]
 fig, ax = subplots(3, 1, figsize=(190/25.4, 190/25.4), sharex=true)
@@ -258,7 +300,7 @@ ax[2].plot(tg01, δτg01[:,l-1], color="tab:blue", linewidth=1, zorder=1, label=
 ax[2].scatter(t01, δτ01[:,l-1], s=1, color="tab:blue", zorder=1)
 ax[2].fill_between(tg01, δτg01[:,l-1] - 2δτerrg01[:,l-1], δτg01[:,l-1] + 2δτerrg01[:,l-1], alpha=.25,
                    color="tab:blue", linewidths=0, zorder=1)
-ax[1].plot(tg01, τargog01[:,1], color="tab:orange", linewidth=1, zorder=0, label="ECCO")
+ax[1].plot(tg01, τargog01[:,1], color="tab:orange", linewidth=1, zorder=0, label="Argo")
 ax[2].plot(tg01, τargog01[:,1] - τargog01[:,l], color="tab:orange", linewidth=1, zorder=0,
            label="Argo")
 ax[1].plot(tg01, τeccog01[:,1], color="tab:green", linewidth=1, zorder=0, label="ECCO")
@@ -305,6 +347,9 @@ for i = 1 : length(idx)+1
   ax[2].pcolormesh(ti, depthi, Targoi08[:,i0:i1], cmap="RdBu_r", vmin=-.11, vmax=.11)
   ax[3].pcolormesh(ti, depthi, Teccoi08[:,i0:i1], cmap="RdBu_r", vmin=-.11, vmax=.11)
 end
+ax[1].set_title(L"$T$ waves")
+ax[2].set_title("Argo")
+ax[3].set_title("ECCO")
 ax[1].set_ylim(5, 0)
 ax[1].set_ylabel("depth (km)")
 ax[2].set_ylabel("depth (km)")
@@ -323,6 +368,9 @@ for i = 1 : length(idx)+1
   ax[2].pcolormesh(ti, depthi, Targoi01[:,i0:i1], cmap="RdBu_r", vmin=-.17, vmax=.17)
   ax[3].pcolormesh(ti, depthi, Teccoi01[:,i0:i1], cmap="RdBu_r", vmin=-.17, vmax=.17)
 end
+ax[1].set_title(L"$T$ waves")
+ax[2].set_title("Argo")
+ax[3].set_title("ECCO")
 ax[1].set_ylim(5, 0)
 ax[1].set_ylabel("depth (km)")
 ax[2].set_ylabel("depth (km)")

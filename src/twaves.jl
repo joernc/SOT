@@ -80,16 +80,11 @@ function twavepick(eqname, tstations, tintervals, tavgwidth, treffreq, pstations
       # check whether all data is present
       if !isfile(tdelayfile) && isfile(tdatafile1) && isfile(tdatafile2)
 
+        # station location
         if ishydr(tstations[i])
-
-          # station location
           stalat, stalon = DataFrame(CSV.File(tstationlocfile(tstations[i])))[1,:]
-
         else
-
-          # station location
           stalat, stalon = h5read(tdatafile1, "latitude"), h5read(tdatafile2, "longitude")
-
         end
 
         # estimate travel time from geodetic distance
@@ -217,6 +212,16 @@ function twavepick(eqname, tstations, tintervals, tavgwidth, treffreq, pstations
           i0 = argmin(abs.(tfreq .- treffreq))
 
           @printf("CC = %4.2f\n", ccc[i0])
+
+#          # experimental: maximize over phase and group delays
+#          δ = -1:.001:1;
+#          G = exp.(-(ω.-2).^2/2tavgwidth^2);
+#          s = exp.(2π*im*(ω.-2)/2 .* δ'.*ω);
+#          ccg = circshift(irfft(conj.(st1).*st2.*G.^2 .* s, n, 1), (n÷2, 0))
+#          Δτ = lags[argmax(ccg)[1]]
+#          Δτg = δ[argmax(ccg)[2]] + Δτ
+#          println("old: Δτ = $(Δτc[tfreq.==2][1])")
+#          println("new: Δτ = $Δτ, Δτg = $Δτg")
 
           # save figure if CC ≥ 0.6
           if saveplot && ccc[i0] ≥ 0.6
