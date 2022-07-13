@@ -247,8 +247,9 @@ ax.set_ylabel("H08 travel time anomaly (s)")
 fig.tight_layout()
 
 # save catalogs of used pairs
-CSV.write("results/nias_DGAR_H08_comparison.csv", tpairs)
-CSV.write("results/nias_DGAR_H08_comparison.csv", ppairs)
+CSV.write("results/nias_DGAR_H08_comparison_tpairs_DGAR.csv", tpairs1)
+CSV.write("results/nias_DGAR_H08_comparison_tpairs_H08.csv", tpairs2)
+CSV.write("results/nias_DGAR_H08_comparison_ppairs.csv", ppairs1)
 
 # save to file
 h5open("results/nias_DGAR_H08_comparison.h5", "w") do file
