@@ -178,7 +178,7 @@ A = P*E'
   σn: measurement noise (s)
   σp: origin time error (s)
 """
-function invert(tpairs, ppairs, λ, σx, σn, σp, U, Σ; σtrend=0, σannual=0, σsemiannual=0)
+function invert(tpairs, ppairs, λ, σc, σn, σp, U, Λ, Δz, h; σtrend=0, σannual=0, σsemiannual=0)
 
   # number of frequencies
   l = length(tpairs.Δτc[1])
@@ -213,51 +213,53 @@ function invert(tpairs, ppairs, λ, σx, σn, σp, U, Σ; σtrend=0, σannual=0,
   D = [I(l*m) vcat([-I(m) for i = 1:l]...)]
 
   # solution covariance in time
-  A = exp.(-abs.(tr.-tr')/λ)
+  C = exp.(-abs.(tr.-tr')/λ)
 
   # transformation from singular vectors to observed frequencies
-  T = kron(sparse(U*Diagonal(Σ)), I(m))
+  T = h*kron(sparse(U*Diagonal(Λ)), I(m))
 
-  # covariance matrix assuming no correlation between singular vectors expansion coefficients
-  Rxx = [T*kron(spdiagm(σx.^2), A)*T' zeros(l*m, m); zeros(m, (l+1)*m)] + σp^2*kron(sparse(ones(l+1, l+1)), I(m))
+  # covariance matrix assuming no correlation between singular vector expansion coefficients
+  R = [T*kron(spdiagm(σc.^2), C)*T' zeros(l*m, m); zeros(m, (l+1)*m)] + σp^2*kron(sparse(ones(l+1, l+1)), I(m))
 
   # add trend if desired
   if !(σtrend == 0)
     tm = tr[1]+(tr[m]-tr[1])/2
-    E = [E E*[kron(I(l), tr.-tm); zeros(m, 3)]]
-    T = U*Diagonal(Σ)
-    Rxx = [Rxx zeros(size(Rxx, 1), l); zeros(l, size(Rxx, 2)) T*spdiagm(σtrend.^2)*T']
+    E = [E [kron(I(l), Xt*(tr.-tm)); zeros(np, l)]]
+    T = h*U*Diagonal(Λ)
+    R = [R zeros(size(R, 1), l); zeros(l, size(R, 2)) T*spdiagm(σtrend.^2)*T']
     D = [D kron(I(l), tr.-tm)]
   end
 
   # add annual cycle if desired
   if !(σannual == 0)
-    ω = 2π/365.2425
-    E = [E E[:,1:l*m]*[kron(I(l), cos.(ω*tr)) kron(I(l), sin.(ω*tr))]]
-    Rxx = [Rxx zeros(size(Rxx, 1), 2l); zeros(2l, size(Rxx, 2)) kron(I(2), T*spdiagm(σannual.^2/2)*T')]
+    ω = 2π/SOT.meanyear
+    E = [E [kron(I(l), Xt*cos.(ω*tr)) kron(I(l), Xt*sin.(ω*tr)); zeros(np, 2l)]]
+    T = h*U*Diagonal(Λ)
+    R = [R zeros(size(R, 1), 2l); zeros(2l, size(R, 2)) kron(I(2), T*spdiagm(σannual.^2/2)*T')]
     D = [D kron(I(l), cos.(ω*tr)) kron(I(l), sin.(ω*tr))]
   end
 
   # add semi-annual cycle if desired
   if !(σsemiannual == 0)
-    ω = 2π/365.2425
-    E = [E E[:,1:l*m]*[kron(I(l), cos.(2ω*tr)) kron(I(l), sin.(2ω*tr))]]
-    Rxx = [Rxx zeros(size(Rxx, 1), 2l); zeros(2l, size(Rxx, 2)) kron(I(2), T*spdiagm(σannual.^2/2)*T')]
-    D = [D kron(I(l), cos.(2ω*tr)) kron(I(l), sin.(2ω*tr))]
+    ω = 4π/SOT.meanyear
+    E = [E [kron(I(l), Xt*cos.(ω*tr)) kron(I(l), Xt*sin.(ω*tr)); zeros(np, 2l)]]
+    T = h*U*Diagonal(Λ)
+    R = [R zeros(size(R, 1), 2l); zeros(2l, size(R, 2)) kron(I(2), T*spdiagm(σsemiannual.^2/2)*T')]
+    D = [D kron(I(l), cos.(ω*tr)) kron(I(l), sin.(ω*tr))]
   end
 
   # noise covariance
-  Rnn = σn^2*I
+  N = σn^2*I
 
   # Gauss–Markov solution covariance matrix
-  P = inv(inv(Array(Rxx)) + E'*inv(Rnn)*E)
+  P = inv(inv(Array(R)) + E'*inv(N)*E)
 
   # Best estimate, subtracting T- and P-delays, adding trend and seasonal cycles:
-  #   τ = D*P*E'*inv(Rnn)*y
+  #   τ = D*P*E'*inv(N)*y
   # Uncertainty:
   #   e = sqrt.(diag(D*P*D'))
 
-  return t, E, Rxx, Rnn, P, D
+  return t, E, R, N, P, D
 
 end
 
@@ -291,27 +293,34 @@ function correctcycleskipping(tpairs, ppairs, E, Rxx, Rnn, P, m)
   x2 = [tpairs.Δτc[i][1] - tpairs.Δτc[i][l] for i = 1:nt]
   x = [x1 x2]
   μ = [1 0.1; 0 0; -1 -0.1]
-  Σ = [0.2^2 0; 0 0.1^2]
+  Λ = [0.2^2 0; 0 0.1^2]
   τ = [0.05, 0.9, 0.05]
-  f(x, μ, Σ) = 1/sqrt((2π)^length(μ)*norm(Σ))*exp(-1/2*(x-μ)'*(Σ\(x-μ)))
+  f(x, μ, Λ) = 1/sqrt((2π)^length(μ)*norm(Λ))*exp(-1/2*(x-μ)'*(Λ\(x-μ)))
   T = nothing
   for n = 1:100
-    T = [τ[j].*f(x[i,:], μ[j,:], Σ) for j=1:3, i=1:nt]
+    T = [τ[j].*f(x[i,:], μ[j,:], Λ) for j=1:3, i=1:nt]
     T ./= sum(T; dims=1)
     τ = sum(T; dims=2)/nt
     μ = sum([T[j,i]*x[i,k] for j=1:3, k=1:2, i=1:nt]; dims=3)[:,:,1]./sum(T; dims=2)
-    Σ = sum([T[j,i]*(x[i,:]-μ[j,:])*(x[i,:]-μ[j,:])' for i = 1:nt, j = 1:3])/nt
+    Λ = sum([T[j,i]*(x[i,:]-μ[j,:])*(x[i,:]-μ[j,:])' for i = 1:nt, j = 1:3])/nt
   end
   cs = [argmax(T[:,i]) for i = 1:nt]
 
   # plot clusters used for initial correction
+  rc("font", size=8)
+  rc("axes", titlesize="medium")
   fig, ax = subplots(1, 2, sharex=true, sharey=true, figsize=(190/25.4, 95/25.4))
   for i = 1:3
     ax[1].scatter(x[cs.==i,1], x[cs.==i,2], s=5)
   end
+  xlim = round(maximum(abs.(ax[1].get_xlim())); digits=2)
+  ylim = round(maximum(abs.(ax[1].get_ylim())); digits=2)
+  ax[1].set_xlim(-xlim, xlim)
+  ax[1].set_ylim(-ylim, ylim)
   ax[1].set_xlabel("low-frequency delay (s)")
   ax[1].set_ylabel("differential delay (s)")
   ax[1].set_title("after clustering")
+  ax[1].set_title("(a)", loc="left")
 
   for i = 1:nt
     if cs[i] != 2
@@ -411,7 +420,8 @@ function correctcycleskipping(tpairs, ppairs, E, Rxx, Rnn, P, m)
   end
   ax[2].set_xlabel("low-frequency delay (s)")
   ax[2].set_title("after additional corrections")
-  fig.tight_layout()
+  ax[2].set_title("(b)", loc="left")
+  fig.tight_layout(w_pad=2)
 
   # return optimal delays
   return collect(eachrow(reshape(y[1:l*nt], (nt, l))))
@@ -458,4 +468,47 @@ function lineartrend(t, y; fitannual=false, fitsemiannual=false)
   # return coefficients and adjusted data
   return x, E*x
 
+end
+
+# Argo/ECCO trend estimation
+function estimatetrend(td, λ, σc, σm, σtrend, σannual, σsemiannual)
+  # number of time points
+  m = length(td)
+  # number of frequencies
+  l = length(σc)
+  # annual frequency
+  ω = 2π/SOT.meanyear
+  # time mid-point
+  tm = td[1]+(td[m]-td[1])/2
+  # design matrix
+  E = [kron(I(l), ones(m)) kron(I(l), td.-tm) kron(I(l), cos.(ω*td)) kron(I(l), sin.(ω*td)) kron(I(l), cos.(2ω*td)) kron(I(l), sin.(2ω*td))]
+  # prior solution uncertainty
+  Rxx = blockdiag(spdiagm(σm.^2), spdiagm(σtrend.^2), kron(I(2), spdiagm(σannual.^2/2)), kron(I(2), spdiagm(σsemiannual.^2/2)))
+  # noise = anomalies correlated in time with correlation time λ
+  C = exp.(-abs.(td.-td')/λ)
+  Rnn = kron(spdiagm(σc.^2), C)
+  # uncertainty matrix
+  P = inv(inv(Array(Rxx)) + E'*inv(Array(Rnn))*E)
+  # matrix to extract projected travel time anomalies associated with the trends
+  M = zeros(size(E))
+  M[:,l+1:2l] = E[:,l+1:2l]
+  return E, Rxx, Rnn, P, M
+end
+
+""" interpolation onto regular grid of averages """
+function regulargrid(td, ti, a, R, λ, h, U, Λ, σc)
+  m = length(td)
+  l = length(Λ)
+  tavg = Dates.value(ti[2] - ti[1])/86400000
+  T = h*U*Diagonal(Λ)
+  tid = Dates.value.(ti .- DateTime(2000, 1, 1, 12, 0, 0))/1000/3600/24 # TODO why 12:00:00?
+  tm = td[1] + (td[m] - td[1])/2
+  ω = 2π/SOT.meanyear
+  p = R\a
+  corr(t1, t2) = abs(t1-t2)>tavg/2 ? 2λ/tavg*exp(-abs(t1-t2)/λ)*sinh(tavg/2λ) : λ/tavg*(2-exp((t1-t2-tavg/2)/λ)-exp(-(t1-t2+tavg/2)/λ))
+  C = corr.(td', tid)
+  F = [kron(T, I(length(ti)))*kron(spdiagm(σc.^2), C)*kron(T', I(m)) zeros(l*length(ti), m) zeros(l*length(ti), 5l)]
+  τi = reshape(F*p, (length(ti), l)) + a[(l+1)*m+1:(l+1)*m+l]'.*(tid.-tm) + a[(l+1)*m+l+1:(l+1)*m+2l]'.*cos.(ω*tid) + a[(l+1)*m+2l+1:(l+1)*m+3l]'.*sin.(ω*tid) + a[(l+1)*m+3l+1:(l+1)*m+4l]'.*cos.(2ω*tid) + a[(l+1)*m+4l+1:(l+1)*m+5l]'.*sin.(2ω*tid)
+  ci = Array((inv(T)*τi')')
+  return τi, ci
 end

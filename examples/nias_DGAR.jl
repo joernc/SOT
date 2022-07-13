@@ -1,5 +1,4 @@
-using .SOT, PyPlot, Printf, Dates, LinearAlgebra, Statistics, SparseArrays
-using HDF5, Interpolations, DataFrames, CSV
+using .SOT, PyPlot, Printf, Dates, LinearAlgebra, Statistics, SparseArrays, HDF5, Interpolations, DataFrames, CSV
 
 # identifier for experiment
 eqname = "nias"
@@ -32,10 +31,15 @@ tinvfreq = [2.0, 3.0]
 tmincc = [0.6, 0.5]
 
 # excluded time period: before 2004-12-01
-excludetimes = [[Date(2001, 1, 1) Date(2004, 12, 1)]]
+# TODO: include more recent data?
+excludetimes = [[Date(2001, 1, 1) Date(2004, 12, 1)],
+                [Date(2018, 12, 15) Date(2022, 1, 1)]]
 
 # manually exclude pairs
 excludepairs = CSV.read("data/catalogs/nias_DGAR_exclude.csv", DataFrame)
+
+# reference depth (for normalization of singular vectors)
+h = 5e3
 
 # download P-wave data
 SOT.downloadseisdata(eqname, pstations)
@@ -67,208 +71,260 @@ for i = findall(idx)
   tpairs.Δτr[i] .-= 1.0
 end
 
-# perform inversion
-t, E, S, P, D = SOT.invert(tpairs, ppairs)
-
 # number of good T- and P-wave pairs
 nt = size(tpairs, 1)
 np = size(ppairs, 1)
 
 # number of unique events
-m = length(t)
+m = length(unique([tpairs.event1; tpairs.event2]))
 
 # number of frequencies
 l = length(tinvfreq)
 
-# invert for P-wave delays without smoothing
-Δτp = E[1:nt,1:m]*(E[l*nt+1:l*nt+np,l*m+1:(l+1)*m]\ppairs.Δτ)
+###
 
-# make cycle-skipping correction
-tpairs.Δτ = SOT.correctcycleskipping(tpairs, ppairs, E, S, P)
+range = h5read("data/temperature/nias_DGAR.h5", "x")
+depth = -h5read("data/temperature/nias_DGAR.h5", "z")
+Δx = range[2] - range[1]
+Δz = depth[1] - depth[2]
+K = sum(h5read("data/temperature/nias_DGAR.h5", "K"), dims=2)[:,1,1:l]'*Δx
 
-# data vector
-y = [reshape(vcat(tpairs.Δτ'...), l*nt); ppairs.Δτ]
+# SVD
+U, Λ, V = svd(K)
 
-# get least-squares solution
-x = P*(E'*y)
+# rescale to be independent of resolution (∫v'vdz = h)
+V /= sqrt(Δz/h)
+Λ *= sqrt(Δz/h)
 
-# variance estimate
-n = y - E*x
-σt = sqrt(mean(n[1:l*nt].^2)*(l*nt+np)/(l*nt+np-l*m-1))
-σp = sqrt(mean(n[l*nt+1:l*nt+np].^2)*(l*nt+np)/(l*nt+np-l*m-1))
-R = spdiagm(0 => [σt^2*ones(l*nt); σp^2*ones(np)])
+# correlation time (days)
+λ = 15
 
-# matrix for error propagation
-A = P*E'
+# solution standard deviation for coefficients of singular vectors (K)
+σc = 1e-3*[15, 10]
 
-# get travel time anomalies and their errors
-τ = reshape(D*x, (m, l))
-τerr = reshape(sqrt.(diag(D*A*R*A'*D')), (m, l))
+# noise (s)
+σn = 0.01
 
-# get frequency differences and their errors
-δD = [vcat([I(m) for i = 1:l-1]...) -I((l-1)*m) spzeros((l-1)*m, m)]
-δτ = reshape(δD*x, (m, l-1))
-δτerr = reshape(sqrt.(diag(δD*A*R*A'*δD')), (m, l-1))
+# origin time correction standard deviation (s)
+σp = 5.0
+
+# trend priors for coefficients of singular vectors (K/day)
+σtrend = 1e-3*[4, 2]/SOT.meanyear
+
+# annual cycle prior (K)
+σannual = 1e-3*[15, 10]
+
+# semi-annual cycle prior (K)
+σsemiannual = 1e-3*[15, 10]
+
+# get inversion matrices
+t, E, R, N, P, D = SOT.invert(tpairs, ppairs, λ, σc, σn, σp, U, Λ, Δz, h; σtrend, σannual, σsemiannual)
+
+tpairs.Δτ = SOT.correctcycleskipping(tpairs, ppairs, E, R, N, P, m)
+
+# collect delays into data vector
+y = [reshape(vcat([(tpairs.Δτ[i])' for i = 1:nt]...), l*nt); ppairs.Δτ]
+
+# invert
+a = P*E'*inv(N)*y
+
+# extract trends
+trends = a[(l+1)*m+1:(l+1)*m+l]
+Ptrends = P[(l+1)*m+1:(l+1)*m+l,(l+1)*m+1:(l+1)*m+l]
+
+# extract annual amplitude
+annuals = hypot.(a[(l+1)*m+l+1:(l+1)*m+2l], a[(l+1)*m+2l+1:(l+1)*m+3l])
+
+# extract semi-annual amplitude
+semiannuals = hypot.(a[(l+1)*m+3l+1:(l+1)*m+4l], a[(l+1)*m+4l+1:(l+1)*m+5l])
+
+ω = 2π/SOT.meanyear
+td = Dates.value.(t - DateTime(2000, 1, 1, 12, 0, 0))/1000/3600/24
+
+# reconstruct full travel time anomalies
+τ = reshape(D*a, (m, l))
+eτ = reshape(sqrt.(diag(D*P*D')), (m, l))
+
+# reconstruct random signal
+Drand = [D[:,1:(l+1)*m] zeros(l*m, 5l)]
+τrand = reshape(Drand*a, (m, l))
+
+# reconstruct trends
+Dtrend = [zeros(l*m, (l+1)*m) D[:,(l+1)*m+1:(l+1)*m+l] zeros(l*m, 4l)]
+τtrend = reshape(Dtrend*a, (m, l))
+eτtrend = reshape(sqrt.(diag(Dtrend*P*Dtrend')), (m, l))
+
+# reconstruct seasonal signal
+Dseasonal = [zeros(l*m, (l+1)*m+l) D[:,(l+1)*m+l+1:(l+1)*m+5l]]
+τseasonal = reshape(Dseasonal*a, (m, l))
+eτseasonal = reshape(sqrt.(diag(Dseasonal*P*Dseasonal')), (m, l))
+
+# project travel time anomalies and trend reconstructions onto singular vectors
+T = h^-1*kron(sparse(inv(Diagonal(Λ))*U'), I(m))
+c = reshape(T*D*a, (m, l))
+ec = reshape(sqrt.(diag(T*D*P*D'*T')), (m, l))
+ctrend = reshape(T*Dtrend*a, (m, l))
+ectrend = reshape(sqrt.(diag(T*Dtrend*P*Dtrend'*T')), (m, l))
+crand = reshape(T*Drand*a, (m, l))
+
+# project trends onto singular vectors
+T = h^-1*inv(Diagonal(Λ))*U'
+ctrends = T*trends
+ectrends = sqrt.(diag(T*Ptrends*T'))
+tannuals = kron(I(2), T)*a[(l+1)*m+l+1:(l+1)*m+3l]
+cannuals = hypot.(tannuals[1:l], tannuals[l+1:2l])
+J = spzeros(l, 2l)
+for i = 1:l
+  J[i,2(i-1)+1:2i] = abs.(tannuals[i:l:i+l])/cannuals[i]
+end
+ecannuals = sqrt.(diag(J*kron(I(2), T)*P[(l+1)*m+l+1:(l+1)*m+3l,(l+1)*m+l+1:(l+1)*m+3l]*kron(I(2), T)'*J'))
+tsemiannuals = kron(I(2), T)*a[(l+1)*m+3l+1:(l+1)*m+5l]
+csemiannuals = hypot.(tsemiannuals[1:l], tsemiannuals[l+1:2l])
+J = spzeros(l, 2l)
+for i = 1:l
+  J[i,2(i-1)+1:2i] = abs.(tsemiannuals[i:l:i+l])/csemiannuals[i]
+end
+ecsemiannuals = sqrt.(diag(J*kron(I(2), T)*P[(l+1)*m+l+1:(l+1)*m+3l,(l+1)*m+l+1:(l+1)*m+3l]*kron(I(2), T)'*J'))
+
+# interpolate onto regular grid
+ti = DateTime(2005, 1, 1, 12, 0, 0) : Day(1) : DateTime(2005, 12, 31, 12, 0, 0)
+τi, ci = SOT.regulargrid(td, ti, a, R, λ, h, U, Λ, σc)
 
 # read and interpolate Argo data
-targo = Dates.value.(Date(2004, 1, 15) .+ Month.(h5read("data/argo/nias_H08.h5", "time"))
-                     .- Date(2000, 1, 1))
-tr = Dates.value.(t - DateTime(2000, 1, 1, 12, 0, 0))/1000/3600/24
-τargo = hcat([extrapolate(interpolate((targo,), h5read("data/argo/nias_H08.h5", "tau")[i,:],
-                                      Gridded(Linear())), Flat())(tr) for i = 1:l]...)
+targo = h5read("data/temperature/nias_DGAR.h5", "targo")
+τargo = h5read("data/temperature/nias_DGAR.h5", "τargo")
+Targo = h5read("data/temperature/nias_DGAR.h5", "Targo")
+τargo = hcat([interpolate((targo,), τargo[:,i], Gridded(Linear()))(td) for i = 1:l]...)
+Targo = hcat([interpolate((targo,), Targo[i,:], Gridded(Linear()))(td) for i = 1:length(depth)]...)
 
 # read and interpolate ECCO data
-tecco = h5read("data/ecco/nias_H08.h5", "time")
-tr = Dates.value.(t - DateTime(2000, 1, 1, 12, 0, 0))/1000/3600/24
-τecco = hcat([extrapolate(interpolate((tecco,), h5read("data/ecco/nias_H08.h5", "tau")[i,:],
-                                      Gridded(Linear())), Flat())(tr) for i = 1:2]...)
+tecco = h5read("data/temperature/nias_DGAR.h5", "tecco")
+τecco = h5read("data/temperature/nias_DGAR.h5", "τecco")
+#Tecco = h5read("data/temperature/nias_DGAR.h5", "Tecco")
+τecco = hcat([interpolate((tecco,), τecco[:,i], Gridded(Linear()))(td) for i = 1:l]...)
+#Tecco = hcat([interpolate((tecco,), Tecco[i,:], Gridded(Linear()))(td) for i = 1:length(depth)]...)
 
-# save timeseries to file
-tr = Dates.value.(t - DateTime(2000, 1, 1, 0, 0, 0))/1000/3600/24
-h5open("results/nias_DGAR.h5", "w") do file
-  write(file, "t", tr)
-  write(file, "tau", τ)
-  write(file, "tauerr", τerr)
-  write(file, "dtau", δτ)
-  write(file, "dtauerr", δτerr)
-  write(file, "tauargo", τargo)
-  write(file, "tauecco", τecco)
-end
+# project Argo and ECCO travel time anomalies onto singular vectors
+cargo = τargo*T'
+cecco = τecco*T'
 
-# offset based on trends
-tr = Dates.value.(t .- t[1])/1000/3600/24
+# estimate ECCO and Argo trends
+Et, Rxxt, Rnnt, Pt, Mt = SOT.estimatetrend(td, λ, σc, σc, σtrend, σannual, σsemiannual)
+Tt = h*kron(I(6), U*Diagonal(Λ))
+
+# Argo trends
+yt = reshape(cargo, l*m)
+xt = Pt*Et'*(Rnnt\yt)
+# travel time anomalies associated with the trend, plus standard errors
+τargotrend = reshape(Mt*Tt*xt, (m, l))
+eτargotrend = reshape(sqrt.(diag(Mt*Tt*Pt*Tt'*Mt')), (m, l))
+# travel time anomalies associated with the trend, projected onto the sinular vectors, plus standard errors
+ctrendargo = reshape(Mt*xt, (m, l))
+ectrendargo = reshape(sqrt.(diag(Mt*Pt*Mt')), (m, l))
+# trends for travel time anomalies
+trendsargo = Tt[l+1:2l,:]*xt
+# trends for travel time anomalies projected onto singular vectors, plus uncertainties
+ctrendsargo = xt[l+1:2l]
+ectrendsargo = sqrt.(diag(Pt[l+1:2l,l+1:2l]))
+# annuals for travel time anomalies projected onto singular vectors, plus uncertainties
+tannualsargo = xt[2l+1:4l]
+cannualsargo = hypot.(tannualsargo[1:l], tannualsargo[l+1:2l])
+J = spzeros(l, 2l)
 for i = 1:l
-  c, _ = SOT.lineartrend(t, τ[:,i]; fitannual=true, fitsemiannual=true)
-  τ[:,i] .-= c[2] + c[1]*tr[end]/2
-  if i == 1
-    δτ[:,:] .-= c[2] + c[1]*tr[end]/2
-  else
-    δτ[:,i-1] .+= c[2] + c[1]*tr[end]/2
-  end
-  c, _ = SOT.lineartrend(t, τargo[:,i]; fitannual=true, fitsemiannual=true)
-  τargo[:,i] .-= c[2] + c[1]*tr[end]/2
-  c, _ = SOT.lineartrend(t, τecco[:,i]; fitannual=true, fitsemiannual=true)
-  τecco[:,i] .-= c[2] + c[1]*tr[end]/2
+  J[i,2(i-1)+1:2i] = abs.(tannualsargo[i:l:i+l])/cannualsargo[i]
 end
-
-# estimate trends
-cτ, _ = SOT.lineartrend(t, τ[:,1]; fitannual=true, fitsemiannual=true)
-cτargo, _ = SOT.lineartrend(t, τargo[:,1]; fitannual=true, fitsemiannual=true)
-cτecco, _ = SOT.lineartrend(t, τecco[:,1]; fitannual=true, fitsemiannual=true)
-cδτ, _ = SOT.lineartrend(t, δτ[:,l-1]; fitannual=true, fitsemiannual=true)
-cδτargo, _ = SOT.lineartrend(t, τargo[:,1] - τargo[:,l]; fitannual=true, fitsemiannual=true)
-cδτecco, _ = SOT.lineartrend(t, τecco[:,1] - τecco[:,l]; fitannual=true, fitsemiannual=true)
-
-# plot measured vs. inverted T-wave delays (lowest freq.)
-fig, ax = subplots(1, 1)
-ax.scatter(y[1:nt,1], E[1:nt,:]*x[:,1], s=5)
-ax.set_aspect(1)
-xl = ax.get_xlim()
-yl = ax.get_ylim()
-a = [-20, 20]
-ax.plot(a, a, color="black", linewidth=.8)
-ax.plot(a, a .+ 1/tinvfreq[1], color="black", linewidth=.8, zorder=0)
-ax.plot(a, a .- 1/tinvfreq[1], color="black", linewidth=.8, zorder=0)
-ax.plot(a, a .+ 1/2tinvfreq[1], color="black", linewidth=.8, zorder=0)
-ax.plot(a, a .- 1/2tinvfreq[1], color="black", linewidth=.8, zorder=0)
-ax.set_xlim(xl)
-ax.set_ylim(yl)
-ax.set_title("T waves")
-ax.set_xlabel("measured delay (s)")
-ax.set_ylabel("inverted delay (s)")
-
-# plot measured vs. inverted P-wave delays (lowest freq.)
-fig, ax = subplots(1, 1)
-ax.scatter(y[nt+1:nt+np], E[nt+1:nt+np,:]*x[:,1], s=5)
-ax.set_aspect(1)
-xl = ax.get_xlim()
-yl = ax.get_ylim()
-a = [-20, 20]
-ax.plot(a, a, color="black", linewidth=.8)
-ax.plot(a, a .+ 1/tinvfreq[1], color="black", linewidth=.8, zorder=0)
-ax.plot(a, a .- 1/tinvfreq[1], color="black", linewidth=.8, zorder=0)
-ax.plot(a, a .+ 1/2tinvfreq[1], color="black", linewidth=.8, zorder=0)
-ax.plot(a, a .- 1/2tinvfreq[1], color="black", linewidth=.8, zorder=0)
-ax.set_xlim(xl)
-ax.set_ylim(yl)
-ax.set_title("P waves")
-ax.set_xlabel("measured delay (s)")
-ax.set_ylabel("inverted delay (s)")
-
-# insert gaps
-function insertgap(t, ys, tgap)
-  idx = findlast(t .< tgap)
-  m = length(t)
-  if !isnothing(idx) && idx < m
-    tg = [t[1:idx]; tgap; t[idx+1:m]]
-    ysg = []
-    for y in ys
-      l = size(y, 2)
-      push!(ysg, [y[1:idx,:]; [NaN for i=1:l]'; y[idx+1:m,:]])
-    end
-  else
-    tg = t
-    ysg = ys
-  end
-  return tg, ysg...
+ecannualsargo = sqrt.(diag(J*Pt[2l+1:4l,2l+1:4l]*J'))
+# semiannuals for travel time anomalies projected onto singular vectors, plus uncertainties
+tsemiannualsargo = xt[4l+1:6l]
+csemiannualsargo = hypot.(tsemiannualsargo[1:l], tsemiannualsargo[l+1:2l])
+J = spzeros(l, 2l)
+for i = 1:l
+  J[i,2(i-1)+1:2i] = abs.(tsemiannualsargo[i:l:i+l])/csemiannualsargo[i]
 end
+ecsemiannualsargo = sqrt.(diag(J*Pt[4l+1:6l,4l+1:6l]*J'))
 
-tg = copy(t)
-τg = copy(τ)
-τerrg = copy(τerr)
-δτg = copy(δτ)
-δτerrg = copy(δτerr)
-τargog = copy(τargo)
-τeccog = copy(τecco)
-# excluded periods
-for i = 1:length(excludetimes)
-  global tg, τg, τerrg, δτg, δτerrg, τargog, τeccog
-  tg, τg, τerrg, δτg, δτerrg, τargog, τeccog = insertgap(tg, [τg, τerrg, δτg, δτerrg,
-                                                              τargog, τeccog],
-                                                         excludetimes[i][1])
+# remove fitted means
+cargo .-= xt[1:l]'
+τargo = cargo*inv(T)'
+
+# ECCO trends
+yt = reshape(cecco, l*m)
+xt = Pt*Et'*(Rnnt\yt)
+# travel time anomalies associated with the trend, plus standard errors
+τeccotrend = reshape(Mt*Tt*xt, (m, l))
+eτeccotrend = reshape(sqrt.(diag(Mt*Tt*Pt*Tt'*Mt')), (m, l))
+# travel time anomalies associated with the trend, projected onto the sinular vectors, plus standard errors
+ctrendecco = reshape(Mt*xt, (m, l))
+ectrendecco = reshape(sqrt.(diag(Mt*Pt*Mt')), (m, l))
+# trends for travel time anomalies
+trendsecco = Tt[l+1:2l,:]*xt
+# trends for travel time anomalies projected onto singular vectors, plus uncertainties
+ctrendsecco = xt[l+1:2l]
+ectrendsecco = sqrt.(diag(Pt[l+1:2l,l+1:2l]))
+# annuals for travel time anomalies projected onto singular vectors, plus uncertainties
+tannualsecco = xt[2l+1:4l]
+cannualsecco = hypot.(tannualsecco[1:l], tannualsecco[l+1:2l])
+J = spzeros(l, 2l)
+for i = 1:l
+  J[i,2(i-1)+1:2i] = abs.(tannualsecco[i:l:i+l])/cannualsecco[i]
 end
+ecannualsecco = sqrt.(diag(J*Pt[2l+1:4l,2l+1:4l]*J'))
+# semiannuals for travel time anomalies projected onto singular vectors, plus uncertainties
+tsemiannualsecco = xt[4l+1:6l]
+csemiannualsecco = hypot.(tsemiannualsecco[1:l], tsemiannualsecco[l+1:2l])
+J = spzeros(l, 2l)
+for i = 1:l
+  J[i,2(i-1)+1:2i] = abs.(tsemiannualsecco[i:l:i+l])/csemiannualsecco[i]
+end
+ecsemiannualsecco = sqrt.(diag(J*Pt[4l+1:6l,4l+1:6l]*J'))
 
-# plot timeseries
-fig, ax = subplots(2, 1, figsize=(16, 6.4), sharex=true)
-ax[1].plot(tg, τg[:,1], color="tab:blue", zorder=3, label=L"$T$ waves")
-ax[1].scatter(t, τ[:,1], s=2, c="tab:blue", zorder=3)
-ax[1].fill_between(tg, τg[:,1] - 2τerrg[:,1], τg[:,1] + 2τerrg[:,1], alpha=.25,
-                   color="tab:blue", linewidths=0, zorder=3)
-ax[2].plot(tg, δτg[:,l-1], color="tab:blue", zorder=3, label=L"$T$ waves")
-ax[2].scatter(t, δτ[:,l-1], s=2, color="tab:blue", zorder=3)
-ax[2].fill_between(tg, δτg[:,l-1] - 2δτerrg[:,l-1], δτg[:,l-1] + 2δτerrg[:,l-1], alpha=.25,
-                   color="tab:blue", linewidths=0, zorder=3)
-ax[1].plot(tg, τargog[:,1], color="tab:orange", zorder=1, label="Argo")
-ax[2].plot(tg, τargog[:,1] - τargog[:,l], color="tab:orange", zorder=1, label="Argo")
-ax[1].plot(tg, τeccog[:,1], color="tab:green", zorder=2, label="ECCO")
-ax[2].plot(tg, τeccog[:,1] - τeccog[:,l], color="tab:green", zorder=2, label="ECCO")
-ax[1].plot(t, cτargo[1]*tr .+ cτargo[2], color="tab:orange", zorder=1)
-ax[1].plot(t, cτecco[1]*tr .+ cτecco[2], color="tab:green", zorder=2)
-ax[1].plot(t, cτ[1]*tr .+ cτ[2], color="tab:blue", zorder=3)
-ax[2].plot(t, cδτargo[1]*tr .+ cδτargo[2], color="tab:orange", zorder=1)
-ax[2].plot(t, cδτecco[1]*tr .+ cδτecco[2], color="tab:green", zorder=2)
-ax[2].plot(t, cδτ[1]*tr .+ cδτ[2], color="tab:blue", zorder=3)
-ax[1].invert_yaxis()
-ax[1].legend(frameon=false, loc=4, ncol=3)
-ax[2].legend(frameon=false, loc=4, ncol=3)
-ax[1].set_xlim(t[1] - (t[end] - t[1])÷100, t[end] + (t[end] - t[1])÷100)
-ax[1].set_ylabel("travel time anomaly (s)")
-ax[2].set_ylabel("travel time difference (s)")
-fig.align_ylabels()
-fig.tight_layout()
+# remove fitted means
+cecco .-= xt[1:l]'
+τecco = cecco*inv(T)'
 
-# plot measured vs. inverted T-wave delays with P-wave delays estimated from inversion
-# without smoothing
-fig, ax = subplots()
-ax.set_aspect(1)
-ax.scatter(y[1:nt,1] - Δτp[:,1], E[1:nt,:]*x[:,1] - Δτp[:,1], s=5)
-xl = ax.get_xlim()
-yl = ax.get_ylim()
-a = [-20, 20]
-ax.plot(a, a, color="black", linewidth=.8)
-ax.plot(a, a .+ 1/tinvfreq[1], color="black", linewidth=.8, zorder=0)
-ax.plot(a, a .- 1/tinvfreq[1], color="black", linewidth=.8, zorder=0)
-ax.set_xlim(xl)
-ax.set_ylim(yl)
-ax.set_xlabel("measured delay (s)")
-ax.set_ylabel("inverted delay (s)")
+# print trends and seasonal amplitudes
+@printf("         %-17s %-9s %-9s\n", "      trend", "  12 mo.", "  6 mo.")
+@printf("         %-17s %-9s %-9s\n", "     (mK/yr)", "   (mK)", "  (mK)")
+@printf("         %-8s %-8s %-4s %-4s %-4s %-4s\n", "    1", "    2", "  1", "  2", "  1", "  2")
+@printf("T-waves: %+3.1f±%3.1f %+3.1f±%3.1f %2.0f±%1.0f %2.0f±%1.0f %2.0f±%1.0f %2.0f±%1.0f\n", SOT.meanyear*1e3*reshape([ctrends[1:2]';2ectrends[1:2]'], 4)..., 1e3*reshape([cannuals[1:2]'; 2ecannuals[1:2]'], 4)..., 1e3*reshape([csemiannuals[1:2]'; 2ecsemiannuals[1:2]'], 4)...,)
+@printf("Argo:    %+3.1f±%3.1f %+3.1f±%3.1f %2.0f±%1.0f %2.0f±%1.0f %2.0f±%1.0f %2.0f±%1.0f\n", SOT.meanyear*1e3*reshape([ctrendsargo[1:2]';2ectrendsargo[1:2]'], 4)..., 1e3*reshape([cannualsargo[1:2]'; 2ecannualsargo[1:2]'], 4)..., 1e3*reshape([csemiannualsargo[1:2]'; 2ecsemiannualsargo[1:2]'], 4)...,)
+@printf("ECCO:    %+3.1f±%3.1f %+3.1f±%3.1f %2.0f±%1.0f %2.0f±%1.0f %2.0f±%1.0f %2.0f±%1.0f\n", SOT.meanyear*1e3*reshape([ctrendsecco[1:2]';2ectrendsecco[1:2]'], 4)..., 1e3*reshape([cannualsecco[1:2]'; 2ecannualsecco[1:2]'], 4)..., 1e3*reshape([csemiannualsecco[1:2]'; 2ecsemiannualsecco[1:2]'], 4)...,)
+
+# temperature trend profile
+ETt, RxxTt, RnnTt, PTt, MTt = SOT.estimatetrend(td, λ, [σc[1]], [σc[1]], [σtrend[1]], [σannual[1]], [σsemiannual[1]])
+Ttrendargo = [(PTt*ETt'*(RnnTt\Targo[:,i]))[2] for i = 1:size(Targo, 2)]
+
+# save catalogs of used pairs
+CSV.write("results/nias_tm_DGAR_tpairs.csv", tpairs)
+CSV.write("results/nias_tm_DGAR_ppairs.csv", ppairs)
+
+# save to file
+h5open("results/nias_DGAR.h5", "w") do file
+  write(file, "t", Dates.value.(t .- DateTime(2000, 1, 1, 0, 0, 0)))
+  write(file, "ti", Dates.value.(ti .- DateTime(2000, 1, 1, 0, 0, 0)))
+  write(file, "z", -depth)
+  write(file, "τ", τ)
+  write(file, "τi", τi)
+  write(file, "τargo", τargo)
+  write(file, "τecco", τecco)
+  write(file, "eτ", eτ)
+  write(file, "c", c)
+  write(file, "ci", ci)
+  write(file, "cargo", cargo)
+  write(file, "cecco", cecco)
+  write(file, "ec", ec)
+  write(file, "ctrend", ctrend)
+  write(file, "ctrendargo", ctrendargo)
+  write(file, "ctrendecco", ctrendecco)
+  write(file, "ectrend", ectrend)
+  write(file, "ectrendargo", ectrendargo)
+  write(file, "ectrendecco", ectrendecco)
+  write(file, "ctrends", ctrends)
+  write(file, "ctrendsargo", ctrendsargo)
+  write(file, "ctrendsecco", ctrendsecco)
+  write(file, "ectrends", ectrends)
+  write(file, "ectrendsargo", ectrendsargo)
+  write(file, "ectrendsecco", ectrendsecco)
+  write(file, "Targo", Targo)
+  #write(file, "Tecco", Tecco)
+end
