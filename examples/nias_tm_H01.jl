@@ -97,6 +97,7 @@ V /= sqrt(Δz/h)
 # get inversion matrices
 t, E, R, N, P, D = SOT.invert(tpairs, ppairs, λ, σc, σn, σp, U, Λ, Δz, h; σtrend, σannual, σsemiannual)
 
+# make cycle-skipping correction
 tpairs.Δτ = SOT.correctcycleskipping(tpairs, ppairs, E, R, N, P, m)
 
 # collect delays into data vector
