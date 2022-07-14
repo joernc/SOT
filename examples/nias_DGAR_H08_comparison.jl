@@ -54,6 +54,9 @@ excludepairs = [CSV.read("data/catalogs/nias_DGAR_exclude.csv", DataFrame),
 #                                   event2=DateTime("2013-12-27T04:18:41.55"),
 #                                   reason="wrong CSC"))
 
+# reference depth (for normalization of singular vectors)
+h = 5e3
+
 # collect usable pairs
 tpairs1, ppairs1 = SOT.collectpairs(eqname, [tstations[1]], tintervals, tavgwidth, treffreq,
                                     tinvfreq, tmincc, pstations, pintervals, pfreqbands;
@@ -218,10 +221,27 @@ Dseasonal = [zeros(l*m, (l+1)*m+l) D[:,(l+1)*m+l+1:(l+1)*m+5l]]
 τseasonal2 = reshape(Dseasonal*a2, (m, l))
 eτseasonal = reshape(sqrt.(diag(Dseasonal*P*Dseasonal')), (m, l))
 
+# read and interpolate Argo data
+targo = h5read("data/temperature/nias_H08.h5", "targo")
+τ1argo = h5read("data/temperature/nias_DGAR.h5", "τargo")
+τ2argo = h5read("data/temperature/nias_H08.h5", "τargo")
+τ1argo = hcat([interpolate((targo,), τ1argo[:,i], Gridded(Linear()))(td) for i = 1:l]...)
+τ2argo = hcat([interpolate((targo,), τ2argo[:,i], Gridded(Linear()))(td) for i = 1:l]...)
+
+# read and interpolate ECCO data
+tecco = h5read("data/temperature/nias_H08.h5", "tecco")
+τ1ecco = h5read("data/temperature/nias_DGAR.h5", "τecco")
+τ2ecco = h5read("data/temperature/nias_H08.h5", "τecco")
+τ1ecco = hcat([interpolate((tecco,), τ1ecco[:,i], Gridded(Linear()))(td) for i = 1:l]...)
+τ2ecco = hcat([interpolate((tecco,), τ2ecco[:,i], Gridded(Linear()))(td) for i = 1:l]...)
+
 # plot differences
 figure()
-plot(t, τ1[:,1] - τ2[:,1])
-scatter(t, τ1[:,1] - τ2[:,1], s=5)
+plot(t, τ1[:,1] - τ2[:,1]; zorder=3)
+fill_between(t, τ1[:,1] - τ2[:,1] - 2sqrt(2)*eτ[:,1], τ1[:,1] - τ2[:,1] + 2sqrt(2)*eτ[:,1]; color="tab:blue", alpha=0.2, linewidths=0, zorder=3)
+plot(t, τ1argo[:,1] - τ2argo[:,1])
+plot(t, τ1ecco[:,1] - τ2ecco[:,1])
+scatter(t, τ1[:,1] - τ2[:,1], s=5, zorder=4)
 xlim(t[1]-Day(30), t[m]+Day(30))
 ylabel("DGAR minus H08 (s)")
 
@@ -236,7 +256,9 @@ scatter(t, τ2[:,1], s=5, zorder=2)
 # scatter τs
 fig, ax = subplots(1, 1; figsize=(4, 4))
 ax.set_aspect(1)
-ax.scatter(τ1[:,1], τ2[:,1]; s=5)
+ax.scatter(τ1[:,1], τ2[:,1]; s=5, zorder=3)
+ax.scatter(τ1argo[:,1], τ2argo[:,1]; s=5, zorder=1)
+ax.scatter(τ1ecco[:,1], τ2ecco[:,1]; s=5, zorder=2)
 #ax.errorbar(τ1[:,1], τ2[:,1]; xerr=eτ[:,1], yerr=eτ[:,1], fmt="none")
 xl = ax.get_xlim()
 ax.plot(xl, xl; color="black", linewidth=1, zorder=0)
@@ -257,6 +279,10 @@ h5open("results/nias_DGAR_H08_comparison.h5", "w") do file
   write(file, "τ1", τ1)
   write(file, "τ2", τ2)
   write(file, "eτ", eτ)
+  write(file, "τ1argo", τ1argo)
+  write(file, "τ2argo", τ2argo)
+  write(file, "τ1ecco", τ1ecco)
+  write(file, "τ2ecco", τ2ecco)
   write(file, "trends1", trends1)
   write(file, "trends2", trends2)
   write(file, "Ptrends", Ptrends)
