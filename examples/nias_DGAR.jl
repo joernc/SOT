@@ -295,8 +295,8 @@ ETt, RxxTt, RnnTt, PTt, MTt = SOT.estimatetrend(td, λ, [σc[1]], [σc[1]], [σt
 Ttrendargo = [(PTt*ETt'*(RnnTt\Targo[:,i]))[2] for i = 1:size(Targo, 2)]
 
 # save catalogs of used pairs
-CSV.write("results/nias_tm_DGAR_tpairs.csv", tpairs)
-CSV.write("results/nias_tm_DGAR_ppairs.csv", ppairs)
+CSV.write("results/nias_DGAR_tpairs.csv", tpairs)
+CSV.write("results/nias_DGAR_ppairs.csv", ppairs)
 
 # save to file
 h5open("results/nias_DGAR.h5", "w") do file
