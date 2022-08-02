@@ -206,7 +206,7 @@ end
 ecsemiannuals = sqrt.(diag(J*kron(I(2), T)*P[(l+1)*m+l+1:(l+1)*m+3l,(l+1)*m+l+1:(l+1)*m+3l]*kron(I(2), T)'*J'))
 
 # interpolate onto regular grid
-ti = DateTime(2005, 1, 1, 12, 0, 0) : Day(1) : DateTime(2005, 12, 31, 12, 0, 0)
+ti = DateTime(2005, 1, 1, 12, 0, 0) : Day(1) : DateTime(2006, 12, 31, 12, 0, 0)
 τi, ci = SOT.regulargrid(td, ti, a, R, λ, h, U, Λ, σc)
 
 # read and interpolate Argo data
