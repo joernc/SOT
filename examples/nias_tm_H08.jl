@@ -4,13 +4,13 @@ using .SOT, PyPlot, Printf, Dates, LinearAlgebra, Statistics, SparseArrays, HDF5
 eqname = "nias_tm"
 
 # P-wave (reference) stations
-pstations = ["PS.PSI..BHZ", "GE.GSI..BHZ"]
+pstations = ["PS.PSI..BHZ", "MY.KUM..BHZ", "II.WRAB.00.BHZ", "GE.GSI..BHZ"]
 
 # intervals to which to cut P waveforms
-pintervals = [[-3, 47], [-3, 47]]
+pintervals = [[-3, 47], [-3, 47], [-3, 47], [-3, 47]]
 
 # frequency bands to which to filter P waveforms
-pfreqbands = [[1, 3], [1, 3]]
+pfreqbands = [[1, 3], [1, 3], [1.5, 2.5], [1, 3]]
 
 # T-wave station
 tstations = ["H08S2"]
@@ -44,14 +44,21 @@ excludepairs = CSV.read("data/catalogs/nias_tm_H08_exclude.csv", DataFrame)
 # reference depth (for normalization of singular vectors)
 h = 5e3
 
+# download P-wave data
+SOT.downloadseisdata(eqname, pstations; src="IRIS", paircat=true)
+#SOT.downloadseisdata(eqname, pstations; src="GFZ")
+
+# cut and filter P waveforms
+SOT.cutpwaves(eqname, pstations, pintervals, pfreqbands; paircat=true)
+
+# measure P-wave pairs
+SOT.measurepairs(eqname, pstations, pintervals, pfreqbands)
+
 # measure T-wave lags Δτ
-SOT.twavepick(eqname, tstations, tintervals, tavgwidth, treffreq, pstations, pintervals,
-              pfreqbands, saveplot=true)
+SOT.twavepick(eqname, tstations, tintervals, tavgwidth, treffreq, pstations, pintervals, pfreqbands)
 
 # collect usable pairs
-tpairs, ppairs = SOT.collectpairs(eqname, tstations, tintervals, tavgwidth, treffreq,
-                                  tinvfreq, tmincc, pstations, pintervals, pfreqbands;
-                                  excludetimes, excludepairs)
+tpairs, ppairs = SOT.collectpairs(eqname, tstations, tintervals, tavgwidth, treffreq, tinvfreq, tmincc, pstations, pintervals, pfreqbands; excludetimes, excludepairs)
 
 ## H08 clock error correction
 #function timingcorrection!(tpairs, starttime, endtime, c)

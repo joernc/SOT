@@ -1,5 +1,4 @@
 # TODO:
-# - Write empty file when data is missing?
 # - Prevent pairing with neighboring event?
 # - Allow for gaps!
 
@@ -13,10 +12,26 @@ global model = taup.TauPyModel(model="prem")
 Download the P waveforms for the event catalog specified by `eqname` and the stations (and
 channels) specified in `stations`. Currently, one full hour after the event is downloaded.
 """
-function downloadseisdata(eqname, stations; src="IRIS")
+function downloadseisdata(eqname, stations; src="IRIS", paircat=false)
 
-  # load event catalog
-  events = DataFrame(CSV.File(@sprintf("data/catalogs/%s.csv", eqname)))
+  if paircat
+
+    # load pair catalog
+    pairs = DataFrame(CSV.File(@sprintf("data/catalogs/%s.csv", eqname)))
+
+    # build catalog of all unique events in pair catalog
+    events1 = pairs[:,1:3]
+    events2 = pairs[:,4:6]
+    rename!(events1, :event1=>:time, :latitude1=>:latitude, :longitude1=>:longitude)
+    rename!(events2, :event2=>:time, :latitude2=>:latitude, :longitude2=>:longitude)
+    events = sort(unique(vcat(events1, events2)))
+
+  else
+
+    # load event catalog
+    events = DataFrame(CSV.File(@sprintf("data/catalogs/%s.csv", eqname)))
+
+  end
 
   # loop over stations
   for s in stations
@@ -39,7 +54,7 @@ function downloadseisdata(eqname, stations; src="IRIS")
       # check if file exists already
       if !isfile(filename)
 
-        @printf("Downloading %s ... ", fmttime)
+        @printf("Downloading %s %s ... ", s, fmttime)
 
         # download data
         try
@@ -70,7 +85,11 @@ function downloadseisdata(eqname, stations; src="IRIS")
             end
 
             @printf("done\n")
+
           else
+
+            # create empty file, so download is not attempted again
+            touch(filename)
 
             @printf("%d gap(s)\n", length(S)-1)
 
@@ -102,16 +121,32 @@ to cutting) with a bandpass specified in `freqbands`, e.g. `freqbands = [[1, 3],
 will filter data from the first station to 1 to 3 Hz and that from the second station to
 1.5 to 2.5 Hz.
 """
-function cutpwaves(eqname, stations, intervals, freqbands)
+function cutpwaves(eqname, stations, intervals, freqbands; paircat=false)
 
-  # load event catalog
-  events = DataFrame(CSV.File(@sprintf("data/catalogs/%s.csv", eqname)))
+  if paircat
+
+    # load pair catalog
+    pairs = DataFrame(CSV.File(@sprintf("data/catalogs/%s.csv", eqname)))
+
+    # build catalog of all unique events in pair catalog
+    events1 = pairs[:,1:3]
+    events2 = pairs[:,4:6]
+    rename!(events1, :event1=>:time, :latitude1=>:latitude, :longitude1=>:longitude)
+    rename!(events2, :event2=>:time, :latitude2=>:latitude, :longitude2=>:longitude)
+    events = sort(unique(vcat(events1, events2)))
+
+  else
+
+    # load event catalog
+    events = DataFrame(CSV.File(@sprintf("data/catalogs/%s.csv", eqname)))
+
+  end
 
   for i in 1 : length(stations)
 
     # path to P-waveform directory
     datapath = seisdatadir(eqname, stations[i])
-    wavepath = seiswavedir(eqname, stations[i], intervals[i], freqbands[i])
+    wavepath = pwavedir(eqname, stations[i], intervals[i], freqbands[i])
 
     # create directory if needed
     mkpath(wavepath)
@@ -125,7 +160,7 @@ function cutpwaves(eqname, stations, intervals, freqbands)
       @printf("%s %s\n", stations[i], fmttime(e.time))
 
       # check if input file is present and output file is not
-      if isfile(datafile) && !isfile(wavefile)
+      if isfile(datafile) && !isfile(wavefile) && filesize(datafile) > 0
 
         # read data
         fid = h5open(datafile, "r")
@@ -145,19 +180,19 @@ function cutpwaves(eqname, stations, intervals, freqbands)
                                             distance_in_degree=rad2deg(d/earthradius),
                                             phase_list=["P"])[1].time
 
-        # band pass filter
-        responsetype = Bandpass(freqbands[i][1], freqbands[i][2]; fs)
-        designmethod = Butterworth(4)
-        filttrace = filtfilt(digitalfilter(responsetype, designmethod), trace)
-
         # time shift due to discrepancy between start time of time series and event time
         timeshift = (starttime - 10^3*(e.time - DateTime(1970, 1, 1)).value)
 
         # find times
         idx = intervals[i][1] .< time .+ timeshift/1e6 .- traveltime .< intervals[i][2]
 
-        # check if data is present
-        if sum(idx) > 1
+        # check if data is present (25 data points needed for bandpass filter)
+        if sum(idx) > 25
+
+          # band pass filter
+          responsetype = Bandpass(freqbands[i][1], freqbands[i][2]; fs)
+          designmethod = Butterworth(4)
+          filttrace = filtfilt(digitalfilter(responsetype, designmethod), trace)
 
           # cut
           cutstarttime = starttime + Int(round(10^6*time[idx][1]))
@@ -230,66 +265,118 @@ function findpairs(eqname, stations, intervals, freqbands; saveplot=false)
     events = allevents[present,:]
 
     # initialize pair catalog
-    pairs = DataFrame(event1=DateTime[], latitude1=Float64[], longitude1=Float64[],
-                      event2=DateTime[], latitude2=Float64[], longitude2=Float64[],
-                      Δτ=Float64[], cc=Float64[])
+    pairs = DataFrame(event1=DateTime[], latitude1=Float64[], longitude1=Float64[], event2=DateTime[], latitude2=Float64[], longitude2=Float64[], Δτ=Float64[], cc=Float64[])
 
     # loop over event pairs
     for j = 1 : size(events, 1) - 1, k = j + 1 : size(events, 1)
 
-      # lengths of waveforms
-      n1 = length(traces[j])
-      n2 = length(traces[k])
+      # ensure sampling rate is identical
+      if fs[j] == fs[k]
 
-      # pad with zeros
-      padtrace1 = [traces[j]; zeros(n2)]
-      padtrace2 = [traces[k]; zeros(n1)]
+        # cross-correlation measurement
+        maxcc, Δτ = xcorr(traces[j], traces[k], fs[j])
 
-      # calculate cross-correlation function
-      norm = sqrt(sum(traces[j].^2)*sum(traces[k].^2))
-      cc = irfft(conj.(rfft(padtrace1)).*rfft(padtrace2), n1+n2)/norm
+        # record if CC is above 0.9 and pair is not a self-repeater
+        if maxcc ≥ 0.9 && starttimes[k] - starttimes[j] > length(traces[j])/fs[j]*1e6
 
-      # find index of max cross-correlation
-      maxidx = argmax(cc)
+          # adjust for starttime recorded in waveforms
+          originadjustment = starttimes[k] - starttimes[j] - 10^3*(events[k,:time] - events[j,:time]).value
+          Δτ += originadjustment/1e6
 
-      # calculate max CC using quadratic interpolation
-      maxcc = maxquad(cc[mod1.(maxidx-1:maxidx+1, n1+n2)])
+          @printf("%s %s %s %5.3f %+6.3f\n", stations[i], fmttime(events[j,:time]), fmttime(events[k,:time]), maxcc, Δτ)
 
-      # record if CC is above 0.9, sampling rate is identical, and pairs is not a repeater
-      if maxcc ≥ 0.9 && fs[j] == fs[k] && starttimes[k] - starttimes[j] > n1/fs[j]*1e6
+          # record in catalog
+          push!(pairs, [events[j,:time], events[j,:latitude], events[j,:longitude], events[k,:time], events[k,:latitude], events[k,:longitude], Δτ, maxcc])
 
-        # integer lags (depending on whether n1 + n2 is even or odd)
-        lags = iseven(n1+n2) ? (-(n1+n2)÷2 : (n1+n2)÷2-1) : (-(n1+n2)÷2 : (n1+n2)÷2)
+        end
 
-        # calculate lag from grid max CC
-        Δτ = mod(maxidx-1, lags)/fs[j]
+      end
 
-        # adjust using quadratic interpolation
-        Δτ += argmaxquad(cc[mod1.(maxidx-1:maxidx+1, n1+n2)], 1/fs[j])
+    end
 
-        # adjust for starttime recorded in waveforms
-        originadjustment = starttimes[k] - starttimes[j] - 10^3*(events[k,:time]
-                                                                 - events[j,:time]).value
-        Δτ += originadjustment/1e6
+    # save catalog to file
+    CSV.write(paircatfile(eqname, stations[i], intervals[i], freqbands[i]), pairs)
 
-        @printf("%s %s %s %4.2f %+6.3f\n", stations[i], fmttime(events[j,:time]),
-                fmttime(events[k,:time]), maxcc, Δτ)
+  end
 
-        # record in catalog
-        push!(pairs, [events[j,:time], events[j,:latitude], events[j,:longitude],
-                      events[k,:time], events[k,:latitude], events[k,:longitude],
-                      Δτ, maxcc])
+end
 
-        # plot cross-correlation function if desired
-        if saveplot
-          fig = figure()
-          plot(lags/fs[j] .+ originadjustment/1e6, circshift(cc, (n1+n2)÷2))
-          xlim(Δτ-5, Δτ+5)
-          xlabel("lag (s)")
-          ylabel("cross-correlation")
-          savefig(@sprintf("%s/%s_%s.pdf", plotpath, fmttime(events[j,:time]),
-                           fmttime(events[k,:time])))
-          close(fig)
+"""
+    measurepairs(eqname, stations, intervals, freqbands; saveplot=false)
+
+Cross-correlate P waveforms for cataloged pairs. The event pairs are read from catalogs
+according to `eqname` and `stations`, and the waveforms are read from folders based on
+`eqname`, `stations`, `intervals`, `freqbands`. Set `saveplot=true` if plots of the
+cross-correlation functions should be saved.
+"""
+function measurepairs(eqname, stations, intervals, freqbands)
+
+  # load event pair catalog
+  allpairs = DataFrame(CSV.File(@sprintf("data/catalogs/%s.csv", eqname)))
+
+  # loop over stations
+  for i = 1 : length(stations)
+
+    # path to P-wave directory
+    wavepath = pwavedir(eqname, stations[i], intervals[i], freqbands[i])
+
+    # initialize pair catalog
+    pairs = DataFrame(event1=DateTime[], latitude1=Float64[], longitude1=Float64[], event2=DateTime[], latitude2=Float64[], longitude2=Float64[], Δτ=Float64[], cc=Float64[])
+
+    # loop over event pairs
+    for pair in eachrow(allpairs)
+
+      # data file names
+      filename1 = @sprintf("%s/%s.h5", wavepath, fmttime(pair.event1))
+      filename2 = @sprintf("%s/%s.h5", wavepath, fmttime(pair.event2))
+
+      @printf("%s %s %s ", stations[i], fmttime(pair.event1), fmttime(pair.event2))
+
+      # ensure files are present
+      if !isfile(filename1)
+        println("file1 missing")
+      elseif !isfile(filename2)
+        println("file2 missing")
+      else
+
+        # read data from files
+        latitude1 = h5read(filename1, "latitude")
+        latitude2 = h5read(filename2, "latitude")
+        longitude1 = h5read(filename1, "longitude")
+        longitude2 = h5read(filename2, "longitude")
+        starttime1 = h5read(filename1, "starttime")
+        starttime2 = h5read(filename2, "starttime")
+        fs1 = h5read(filename1, "fs")
+        fs2 = h5read(filename2, "fs")
+        trace1 = h5read(filename1, "trace")
+        trace2 = h5read(filename2, "trace")
+
+        # ensure sampling rate is identical
+        if fs1 != fs2
+          println("fs1 ≠ fs2")
+        else
+
+          # cross-correlation measurement
+          maxcc, Δτ = xcorr(trace1, trace2, fs1)
+
+          # record if CC is above 0.9 and pair is not a self-repeater
+          if maxcc < 0.9
+            @printf("%5.3f\n", maxcc)
+          elseif starttime2 - starttime1 ≤ length(trace1)/fs1*1e6
+            println("suspected self-repeater")
+          else
+
+            # adjust for starttime recorded in waveforms
+            originadjustment = starttime2 - starttime1 - 10^3*(pair.event2 - pair.event1).value
+            Δτ += originadjustment/1e6
+
+            @printf("%5.3f %+6.3f\n", maxcc, Δτ)
+
+            # record in catalog
+            push!(pairs, [pair.event1, pair.latitude1, pair.longitude1, pair.event2, pair.latitude2, pair.longitude2, Δτ, maxcc])
+
+          end
+
         end
 
       end
@@ -302,6 +389,114 @@ function findpairs(eqname, stations, intervals, freqbands; saveplot=false)
   end
 
 end
+
+"Cross-correlation measurement"
+function xcorr(trace1, trace2, fs; maxlag=12)
+
+#  # length of time series (take smaller one)
+#  n = min(length(trace1), length(trace2))
+#
+#  # maximum lag: 8s
+#  k = Int(8*fs)
+#
+#  # measure CC by cross-correlating overlapping time chunks
+#  cc = Array{Float64}(undef, 2k+3)
+#  for i = -k-1 : 0
+#    t1 = trace1[1-i:n]
+#    t2 = trace2[1:n+i]
+#    cc[i+k+2] = sum(t1.*t2)/sqrt(sum(t1.^2)*sum(t2.^2))
+#  end
+#  for i = 1:k+1
+#    t1 = trace1[1:n-i]
+#    t2 = trace2[1+i:n]
+#    cc[i+k+2] = sum(t1.*t2)/sqrt(sum(t1.^2)*sum(t2.^2))
+#  end
+#
+#  # find index of max covariance (excluding padded measurements)
+#  maxidx = argmax(cc[2:2k+2]) + 1
+#
+#  # calculate max CC using quadratic interpolation
+#  maxcc = maxquad(cc[maxidx-1:maxidx+1])
+#
+#  # time shift adjusted using quadratic interpolation
+#  Δτ = (maxidx-k-2)/fs + argmaxquad(cc[maxidx-1:maxidx+1], 1/fs)
+
+  # lengths of waveforms
+  n1 = length(trace1)
+  n2 = length(trace2)
+
+  # pad with zeros
+  padtrace1 = [trace1; zeros(n2)]
+  padtrace2 = [trace2; zeros(n1)]
+
+  # calculate covariance function
+  cov = irfft(conj.(rfft(padtrace1)).*rfft(padtrace2), n1+n2)
+
+  # indicator functions
+  ind1 = [ones(n1); zeros(n2)]
+  ind2 = [ones(n2); zeros(n1)]
+
+  # calculate normalization factors
+  norm1 = irfft(conj.(rfft(padtrace1.^2)).*rfft(ind2), n1+n2)
+  norm2 = irfft(conj.(rfft(ind1)).*rfft(padtrace2.^2), n1+n2)
+
+  # exclude negative and zero normalization factors (due to roundoff error and non-overlapping segments)
+  norm1[norm1.≤0] .= Inf
+  norm2[norm2.≤0] .= Inf
+
+  # cross-correlation
+  cc = cov./sqrt.(norm1.*norm2)
+
+  # find index of max covariance in allowable range (±maxlag, in seconds)
+  k = Int(round(maxlag*fs))
+  cca = copy(cc); cca[k+2:n1+n2-k] .= 0
+  maxidx = argmax(cca)
+
+  # integer lags (depending on whether n1 + n2 is even or odd)
+  lags = iseven(n1+n2) ? (-(n1+n2)÷2 : (n1+n2)÷2-1) : (-(n1+n2)÷2 : (n1+n2)÷2)
+
+  # index shift from grid max covariance
+  Δi = mod(maxidx-1, lags)
+
+  # calculate max CC using quadratic interpolation
+  maxcc = maxquad(cc[mod1.(maxidx-1:maxidx+1, n1+n2)])
+
+  # time shift adjusted using quadratic interpolation
+  Δτ = Δi/fs + argmaxquad(cc[mod1.(maxidx-1:maxidx+1, n1+n2)], 1/fs)
+
+#  # lengths of waveforms
+#  n1 = length(trace1)
+#  n2 = length(trace2)
+#
+#  # pad with zeros
+#  padtrace1 = [trace1; zeros(n2)]
+#  padtrace2 = [trace2; zeros(n1)]
+#
+#  # calculate covariance function
+#  cc = irfft(conj.(rfft(padtrace1)).*rfft(padtrace2), n1+n2)
+#
+#  # find index of max covariance
+#  maxidx = argmax(cc)
+#
+#  # integer lags (depending on whether n1 + n2 is even or odd)
+#  lags = iseven(n1+n2) ? (-(n1+n2)÷2 : (n1+n2)÷2-1) : (-(n1+n2)÷2 : (n1+n2)÷2)
+#
+#  # index shift from grid max covariance
+#  Δi = mod(maxidx-1, lags)
+#
+#  # normalize based on overlap at max covariance
+#  Z = sqrt(sum(padtrace1[1-min(Δi, 0):n2-max(Δi, 0)].^2)*sum(padtrace2[1+max(Δi, 0):n1+min(Δi, 0)].^2))
+#
+#  # calculate max CC using quadratic interpolation
+#  maxcc = maxquad(cc[mod1.(maxidx-1:maxidx+1, n1+n2)])/Z
+#
+#  # time shift adjusted using quadratic interpolation
+#  Δτ = Δi/fs + argmaxquad(cc[mod1.(maxidx-1:maxidx+1, n1+n2)], 1/fs)
+
+  return maxcc, Δτ
+
+end
+
 
 "Time format"
 fmttime(time) = Dates.format(time, "yyyy-mm-ddTHH:MM:SS.ss")

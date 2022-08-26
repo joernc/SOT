@@ -78,7 +78,7 @@ function twavepick(eqname, tstations, tintervals, tavgwidth, treffreq, pstations
       tdatafile2 = tdatafile(eqname, tstations[i], pairs[j,:event2])
 
       # check whether all data is present
-      if !isfile(tdelayfile) && isfile(tdatafile1) && isfile(tdatafile2)
+      if !isfile(tdelayfile) && isfile(tdatafile1) && isfile(tdatafile2) && filesize(tdatafile1) > 0 && filesize(tdatafile2) > 0
 
         # station location
         if ishydr(tstations[i])
@@ -193,10 +193,8 @@ function twavepick(eqname, tstations, tintervals, tavgwidth, treffreq, pstations
           st2f = st2.*G
 
           # normalization
-          norm1 = (abs.(st1f[1,:]).^2 + 2sum(abs.(st1f[2:n÷2,:]).^2, dims=1)[1,:]
-                   + abs.(st1f[n÷2+1,:]).^2)/n
-          norm2 = (abs.(st2f[1,:]).^2 + 2sum(abs.(st2f[2:n÷2,:]).^2, dims=1)[1,:]
-                   + abs.(st2f[n÷2+1,:]).^2)/n
+          norm1 = (abs.(st1f[1,:]).^2 + 2sum(abs.(st1f[2:n÷2,:]).^2, dims=1)[1,:] + abs.(st1f[n÷2+1,:]).^2)/n
+          norm2 = (abs.(st2f[1,:]).^2 + 2sum(abs.(st2f[2:n÷2,:]).^2, dims=1)[1,:] + abs.(st2f[n÷2+1,:]).^2)/n
 
           # cross-correlation function
           cc = circshift(irfft(conj(st1f).*st2f, n, 1)./sqrt.(norm1.*norm2)', (n÷2, 0))
@@ -248,6 +246,9 @@ function twavepick(eqname, tstations, tintervals, tavgwidth, treffreq, pstations
             write(fid, "ccc", ccc)
             write(fid, "ccr", ccr)
             write(fid, "ccl", ccl)
+#            # also save full info for plot
+#            write(fid, "Δ", Δ)
+#            write(fid, "cc", cc)
           end
 
         end
