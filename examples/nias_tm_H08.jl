@@ -6,6 +6,9 @@ eqname = "nias_tm"
 # P-wave (reference) stations
 pstations = ["PS.PSI..BHZ", "MY.KUM..BHZ", "II.WRAB.00.BHZ", "GE.GSI..BHZ"]
 
+# P-wave download source
+psrc = ["IRIS", "IRIS", "IRIS", "GFZ"]
+
 # intervals to which to cut P waveforms
 pintervals = [[-3, 47], [-3, 47], [-3, 47], [-3, 47]]
 
@@ -31,9 +34,7 @@ tinvfreq = 2.0:1.0:4.0
 tmincc = 0.6:-0.1:0.4
 
 # excluded time periods: before 2004-12-01 and periods with uncorrected clock error
-excludetimes = [[Date(2001, 1, 1) Date(2004, 12, 1)],
-                [DateTime("2010-01-23T00:00:00") DateTime("2012-01-20T00:00:00")],
-                [Date(2017, 6, 1) Date(2018, 1, 1)]]
+excludetimes = [[Date(2001, 1, 1) Date(2004, 12, 1)], [DateTime("2010-01-23T00:00:00") DateTime("2012-01-20T00:00:00")], [Date(2017, 6, 1) Date(2018, 1, 1)]]
 #excludetimes = [[Date(2001, 1, 1) Date(2004, 12, 1)],
 #                [DateTime("2010-03-16T00:00:00") DateTime("2010-05-17T02:06:17.760")],
 #                [Date(2017, 6, 1) Date(2018, 1, 1)]]
@@ -45,8 +46,7 @@ excludepairs = CSV.read("data/catalogs/nias_tm_H08_exclude.csv", DataFrame)
 h = 5e3
 
 # download P-wave data
-SOT.downloadseisdata(eqname, pstations; src="IRIS", paircat=true)
-#SOT.downloadseisdata(eqname, pstations; src="GFZ")
+SOT.downloadseisdata(eqname, pstations; paircat=true, src=psrc)
 
 # cut and filter P waveforms
 SOT.cutpwaves(eqname, pstations, pintervals, pfreqbands; paircat=true)

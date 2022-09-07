@@ -1,8 +1,4 @@
 pstation,event1,event2,reason
-PS.PSI..BHZ,2005-02-05T18:07:16,2010-10-10T14:56:30,two cycles skipped
-PS.PSI..BHZ,2008-07-19T22:50:21,2008-07-20T21:36:47,way out of range
-PS.PSI..BHZ,2010-10-10T14:56:30,2013-12-29T00:10:14,two cycles skipped
-GE.GSI..BHZ,2010-10-10T14:56:30,2013-12-29T00:10:14,two cycles skipped
 GE.GSI..BHZ,2007-10-27T18:35:15,2007-10-27T18:38:04,self-repeater at H01 that is not removed
 MY.KUM..BHZ,2005-05-04T15:07:29,2009-01-16T10:28:37,origin time correction inconsistent with PSI
 MY.KUM..BHZ,2005-08-19T13:05:09,2009-01-16T10:28:37,origin time correction inconsistent with PSI
@@ -12,5 +8,8 @@ MY.KUM..BHZ,2009-01-14T22:46:09,2016-09-18T09:35:26,origin time correction incon
 MY.KUM..BHZ,2005-02-27T17:42:42,2009-01-14T22:46:09,origin time correction inconsistent with PSI
 MY.KUM..BHZ,2005-04-27T06:31:42,2009-01-14T22:46:09,origin time correction inconsistent with PSI
 MY.KUM..BHZ,2008-03-23T14:36:34,2009-01-14T22:46:09,origin time correction inconsistent with PSI
+PS.PSI..BHZ,2005-02-05T18:07:16,2010-10-10T14:56:30,two cycles skipped
+PS.PSI..BHZ,2005-03-08T00:06:58,2010-10-10T14:56:30,two cycles skipped
+PS.PSI..BHZ,2010-10-10T14:56:30,2013-12-29T00:10:14,two cycles skipped
 MY.KUM..BHZ,2010-10-10T14:56:30,2013-12-29T00:10:14,two cycles skipped
-
+GE.GSI..BHZ,2010-10-10T14:56:30,2013-12-29T00:10:14,two cycles skipped

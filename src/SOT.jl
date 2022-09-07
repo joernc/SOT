@@ -1,6 +1,6 @@
 module SOT
 
-using Seis, SeisIO, CSV, DataFrames, HDF5, Dates
+using Seis, SeisIO, LightXML, CSV, DataFrames, HDF5, Dates
 using PyPlot, PyCall, Printf, ProgressMeter
 using LinearAlgebra, SparseArrays, FFTW, Statistics, DSP
 

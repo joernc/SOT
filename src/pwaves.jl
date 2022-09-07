@@ -20,10 +20,10 @@ function downloadseisdata(eqname, stations; src="IRIS", paircat=false)
     pairs = DataFrame(CSV.File(@sprintf("data/catalogs/%s.csv", eqname)))
 
     # build catalog of all unique events in pair catalog
-    events1 = pairs[:,1:3]
-    events2 = pairs[:,4:6]
-    rename!(events1, :event1=>:time, :latitude1=>:latitude, :longitude1=>:longitude)
-    rename!(events2, :event2=>:time, :latitude2=>:latitude, :longitude2=>:longitude)
+    events1 = pairs[:,[1;3:5]]
+    events2 = pairs[:,[2;6:8]]
+    rename!(events1, :event1=>:time, :latitude1=>:latitude, :longitude1=>:longitude, :depth1=>:depth)
+    rename!(events2, :event2=>:time, :latitude2=>:latitude, :longitude2=>:longitude, :depth2=>:depth)
     events = sort(unique(vcat(events1, events2)))
 
   else
@@ -34,7 +34,14 @@ function downloadseisdata(eqname, stations; src="IRIS", paircat=false)
   end
 
   # loop over stations
-  for s in stations
+  for (i, s) in enumerate(stations)
+
+    # select source (station-dependent if given as vector)
+    if typeof(src) == Vector{String}
+      source = src[i]
+    else
+      source = src
+    end
 
     # path to P-waveform directory
     path = seisdatadir(eqname, s)
@@ -56,13 +63,16 @@ function downloadseisdata(eqname, stations; src="IRIS", paircat=false)
 
         @printf("Downloading %s %s ... ", s, fmttime)
 
-        # download data
         try
 
-          S = get_data("FDSN", s; s=string(e.time), t=string(e.time + Hour(1)), src)
+          # download data
+          S = get_data("FDSN", s; s=string(e.time), t=string(e.time + Hour(1)), src=source, xf=tempname(cleanup=true))
 
           # check if there are no gaps
-          if length(S) == 1
+          if length(S) == 1 && size(S[1].t, 1) > 0
+
+            # remove instrument response
+            remove_resp!(S)
 
             # write to file
             h5open(filename, "w") do fid
@@ -97,6 +107,11 @@ function downloadseisdata(eqname, stations; src="IRIS", paircat=false)
 
         catch y
 
+          # create empty file, so download is not attempted again
+          if isa(y, LightXML.XMLParseError)
+            touch(filename)
+          end
+
           @printf("failed\n")
 
         end
@@ -129,10 +144,10 @@ function cutpwaves(eqname, stations, intervals, freqbands; paircat=false)
     pairs = DataFrame(CSV.File(@sprintf("data/catalogs/%s.csv", eqname)))
 
     # build catalog of all unique events in pair catalog
-    events1 = pairs[:,1:3]
-    events2 = pairs[:,4:6]
-    rename!(events1, :event1=>:time, :latitude1=>:latitude, :longitude1=>:longitude)
-    rename!(events2, :event2=>:time, :latitude2=>:latitude, :longitude2=>:longitude)
+    events1 = pairs[:,[1;3:5]]
+    events2 = pairs[:,[2;6:8]]
+    rename!(events1, :event1=>:time, :latitude1=>:latitude, :longitude1=>:longitude, :depth1=>:depth)
+    rename!(events2, :event2=>:time, :latitude2=>:latitude, :longitude2=>:longitude, :depth2=>:depth)
     events = sort(unique(vcat(events1, events2)))
 
   else
@@ -176,9 +191,7 @@ function cutpwaves(eqname, stations, intervals, freqbands; paircat=false)
 
         # predict P-wave travel time
         d = dist(e.longitude, e.latitude, longitude, latitude)
-        traveltime = model.get_travel_times(source_depth_in_km=0,
-                                            distance_in_degree=rad2deg(d/earthradius),
-                                            phase_list=["P"])[1].time
+        traveltime = model.get_travel_times(source_depth_in_km=e.depth, distance_in_degree=rad2deg(d/earthradius), phase_list=["P", "p"])[1].time
 
         # time shift due to discrepancy between start time of time series and event time
         timeshift = (starttime - 10^3*(e.time - DateTime(1970, 1, 1)).value)
@@ -393,34 +406,6 @@ end
 "Cross-correlation measurement"
 function xcorr(trace1, trace2, fs; maxlag=12)
 
-#  # length of time series (take smaller one)
-#  n = min(length(trace1), length(trace2))
-#
-#  # maximum lag: 8s
-#  k = Int(8*fs)
-#
-#  # measure CC by cross-correlating overlapping time chunks
-#  cc = Array{Float64}(undef, 2k+3)
-#  for i = -k-1 : 0
-#    t1 = trace1[1-i:n]
-#    t2 = trace2[1:n+i]
-#    cc[i+k+2] = sum(t1.*t2)/sqrt(sum(t1.^2)*sum(t2.^2))
-#  end
-#  for i = 1:k+1
-#    t1 = trace1[1:n-i]
-#    t2 = trace2[1+i:n]
-#    cc[i+k+2] = sum(t1.*t2)/sqrt(sum(t1.^2)*sum(t2.^2))
-#  end
-#
-#  # find index of max covariance (excluding padded measurements)
-#  maxidx = argmax(cc[2:2k+2]) + 1
-#
-#  # calculate max CC using quadratic interpolation
-#  maxcc = maxquad(cc[maxidx-1:maxidx+1])
-#
-#  # time shift adjusted using quadratic interpolation
-#  Δτ = (maxidx-k-2)/fs + argmaxquad(cc[maxidx-1:maxidx+1], 1/fs)
-
   # lengths of waveforms
   n1 = length(trace1)
   n2 = length(trace2)
@@ -452,48 +437,28 @@ function xcorr(trace1, trace2, fs; maxlag=12)
   cca = copy(cc); cca[k+2:n1+n2-k] .= 0
   maxidx = argmax(cca)
 
-  # integer lags (depending on whether n1 + n2 is even or odd)
-  lags = iseven(n1+n2) ? (-(n1+n2)÷2 : (n1+n2)÷2-1) : (-(n1+n2)÷2 : (n1+n2)÷2)
+  # check whether CC = 0
+  if cc[maxidx] == 0
 
-  # index shift from grid max covariance
-  Δi = mod(maxidx-1, lags)
+    return 0.0, NaN
 
-  # calculate max CC using quadratic interpolation
-  maxcc = maxquad(cc[mod1.(maxidx-1:maxidx+1, n1+n2)])
+  else
 
-  # time shift adjusted using quadratic interpolation
-  Δτ = Δi/fs + argmaxquad(cc[mod1.(maxidx-1:maxidx+1, n1+n2)], 1/fs)
+    # integer lags (depending on whether n1 + n2 is even or odd)
+    lags = iseven(n1+n2) ? (-(n1+n2)÷2 : (n1+n2)÷2-1) : (-(n1+n2)÷2 : (n1+n2)÷2)
 
-#  # lengths of waveforms
-#  n1 = length(trace1)
-#  n2 = length(trace2)
-#
-#  # pad with zeros
-#  padtrace1 = [trace1; zeros(n2)]
-#  padtrace2 = [trace2; zeros(n1)]
-#
-#  # calculate covariance function
-#  cc = irfft(conj.(rfft(padtrace1)).*rfft(padtrace2), n1+n2)
-#
-#  # find index of max covariance
-#  maxidx = argmax(cc)
-#
-#  # integer lags (depending on whether n1 + n2 is even or odd)
-#  lags = iseven(n1+n2) ? (-(n1+n2)÷2 : (n1+n2)÷2-1) : (-(n1+n2)÷2 : (n1+n2)÷2)
-#
-#  # index shift from grid max covariance
-#  Δi = mod(maxidx-1, lags)
-#
-#  # normalize based on overlap at max covariance
-#  Z = sqrt(sum(padtrace1[1-min(Δi, 0):n2-max(Δi, 0)].^2)*sum(padtrace2[1+max(Δi, 0):n1+min(Δi, 0)].^2))
-#
-#  # calculate max CC using quadratic interpolation
-#  maxcc = maxquad(cc[mod1.(maxidx-1:maxidx+1, n1+n2)])/Z
-#
-#  # time shift adjusted using quadratic interpolation
-#  Δτ = Δi/fs + argmaxquad(cc[mod1.(maxidx-1:maxidx+1, n1+n2)], 1/fs)
+    # index shift from grid max covariance
+    Δi = mod(maxidx-1, lags)
 
-  return maxcc, Δτ
+    # calculate max CC using quadratic interpolation
+    maxcc = maxquad(cc[mod1.(maxidx-1:maxidx+1, n1+n2)])
+
+    # time shift adjusted using quadratic interpolation
+    Δτ = Δi/fs + argmaxquad(cc[mod1.(maxidx-1:maxidx+1, n1+n2)], 1/fs)
+
+    return maxcc, Δτ
+
+  end
 
 end
 

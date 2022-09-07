@@ -6,6 +6,9 @@ eqname = "nias_isc"
 # P-wave (reference) stations
 pstations = ["PS.PSI..BHZ", "MY.KUM..BHZ", "II.WRAB.00.BHZ", "GE.GSI..BHZ"]
 
+# P-wave download source
+psrc = ["IRIS", "IRIS", "IRIS", "GFZ"]
+
 # intervals to which to cut P waveforms
 pintervals = [[-3, 47], [-3, 47], [-3, 47], [-3, 47]]
 
@@ -14,6 +17,9 @@ pfreqbands = [[1, 3], [1, 3], [1.5, 2.5], [1, 3]]
 
 # T-wave station
 tstations = ["II.DGAR.00.BHZ"]
+
+# T-wave download source
+tsrc = ["IRIS"]
 
 # T-wave time window around predicted arrival time
 tintervals = [[-10, 70]]
@@ -32,8 +38,7 @@ tmincc = [0.6, 0.5]
 
 # excluded time period: before 2004-12-01
 # TODO: include more recent data?
-excludetimes = [[Date(2001, 1, 1) Date(2004, 12, 1)],
-                [Date(2018, 12, 15) Date(2022, 1, 1)]]
+excludetimes = [[Date(2001, 1, 1) Date(2004, 12, 1)], [Date(2018, 12, 15) Date(2022, 1, 1)]]
 
 # manually exclude pairs
 excludepairs = CSV.read("data/catalogs/nias_isc_DGAR_exclude.csv", DataFrame)
@@ -41,20 +46,20 @@ excludepairs = CSV.read("data/catalogs/nias_isc_DGAR_exclude.csv", DataFrame)
 # reference depth (for normalization of singular vectors)
 h = 5e3
 
-## download P-wave data
-#SOT.downloadseisdata(eqname, pstations)
+# download P-wave data
+SOT.downloadseisdata(eqname, pstations; src=psrc)
 
-## cut and filter P waveforms
-#SOT.cutpwaves(eqname, pstations, pintervals, pfreqbands)
+# cut and filter P waveforms
+SOT.cutpwaves(eqname, pstations, pintervals, pfreqbands)
 
-## find P-wave pairs
-#SOT.findpairs(eqname, pstations, pintervals, pfreqbands)
+# find P-wave pairs
+SOT.findpairs(eqname, pstations, pintervals, pfreqbands)
 
-## download T-wave data
-#SOT.downloadseisdata(eqname, tstations)
+# download T-wave data
+SOT.downloadseisdata(eqname, tstations; src=tsrc)
 
-## measure T-wave lags Δτ
-#SOT.twavepick(eqname, tstations, tintervals, tavgwidth, treffreq, pstations, pintervals, pfreqbands)
+# measure T-wave lags Δτ
+SOT.twavepick(eqname, tstations, tintervals, tavgwidth, treffreq, pstations, pintervals, pfreqbands)
 
 # collect usable pairs
 tpairs, ppairs = SOT.collectpairs(eqname, tstations, tintervals, tavgwidth, treffreq, tinvfreq, tmincc, pstations, pintervals, pfreqbands; excludetimes, excludepairs)

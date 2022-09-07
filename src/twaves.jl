@@ -251,6 +251,11 @@ function twavepick(eqname, tstations, tintervals, tavgwidth, treffreq, pstations
 #            write(fid, "cc", cc)
           end
 
+        else
+
+          # create empty file to prevent repeated measuring attempt
+          touch(tdelayfile)
+
         end
 
       end

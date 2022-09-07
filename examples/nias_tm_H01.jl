@@ -6,6 +6,9 @@ eqname = "nias_tm"
 # P-wave (reference) stations
 pstations = ["PS.PSI..BHZ", "MY.KUM..BHZ", "II.WRAB.00.BHZ", "GE.GSI..BHZ"]
 
+# P-wave download source
+psrc = ["IRIS", "IRIS", "IRIS", "GFZ"]
+
 # intervals to which to cut P waveforms
 pintervals = [[-3, 47], [-3, 47], [-3, 47], [-3, 47]]
 
@@ -40,8 +43,7 @@ excludepairs = CSV.read("data/catalogs/nias_tm_H01_exclude.csv", DataFrame)
 h = 5e3
 
 # download P-wave data
-SOT.downloadseisdata(eqname, pstations; src="IRIS", paircat=true)
-#SOT.downloadseisdata(eqname, pstations; src="GFZ")
+SOT.downloadseisdata(eqname, pstations; paircat=true, src=psrc)
 
 # cut and filter P waveforms
 SOT.cutpwaves(eqname, pstations, pintervals, pfreqbands; paircat=true)

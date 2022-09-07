@@ -23,10 +23,7 @@ julia> tpairs, ppairs = SOT.collectpairs("nias", ["H08S2..EDH"], ["PSI"], [2, 4]
 [...]
 ```
 """
-function collectpairs(eqname, tstations, tintervals, tavgwidth, treffreq, tinvfreq, tmincc,
-                      pstations, pintervals, pfreqbands; tmaxΔτ=Inf, excludetimes=[],
-                      excludepairs=DataFrame(pstation=String[], event1=DateTime[],
-                                             event2=DateTime[]))
+function collectpairs(eqname, tstations, tintervals, tavgwidth, treffreq, tinvfreq, tmincc, pstations, pintervals, pfreqbands; tmaxΔτ=Inf, excludetimes=[], excludepairs=DataFrame(pstation=String[], event1=DateTime[], event2=DateTime[]))
 
   # number of frequencies at which to perform inversion
   l = length(tinvfreq)
@@ -52,22 +49,16 @@ function collectpairs(eqname, tstations, tintervals, tavgwidth, treffreq, tinvfr
   end
 
   # list of all selected T-wave pairs
-  tpairs = DataFrame(station=String[], event1=DateTime[], event2=DateTime[],
-                     Δτl=Array{Float64,1}[], Δτc=Array{Float64,1}[],
-                     Δτr=Array{Float64,1}[], ccl=Array{Float64,1}[],
-                     ccc=Array{Float64,1}[], ccr=Array{Float64,1}[])
+  tpairs = DataFrame(station=String[], event1=DateTime[], event2=DateTime[], Δτl=Array{Float64,1}[], Δτc=Array{Float64,1}[], Δτr=Array{Float64,1}[], ccl=Array{Float64,1}[], ccc=Array{Float64,1}[], ccr=Array{Float64,1}[])
 
   # collect all T-wave pairs that meet the criteria
   @showprogress for i = 1 : length(tstations), j = 1 : size(ppairs, 1)
 
     # file with T-wave data
-    tdelayfile = @sprintf("%s/%s_%s.h5",
-                          tdelaydir(eqname, tstations[i], tintervals[i], tavgwidth,
-                                    treffreq),
-                          fmttime(ppairs[j,:event1]), fmttime(ppairs[j,:event2]))
+    tdelayfile = @sprintf("%s/%s_%s.h5", tdelaydir(eqname, tstations[i], tintervals[i], tavgwidth, treffreq), fmttime(ppairs[j,:event1]), fmttime(ppairs[j,:event2]))
 
     # read data if present
-    if isfile(tdelayfile)
+    if isfile(tdelayfile) && filesize(tdelayfile) > 0
 
       # open file
       fid = h5open(tdelayfile, "r")
@@ -86,9 +77,7 @@ function collectpairs(eqname, tstations, tintervals, tavgwidth, treffreq, tinvfr
       if all(ccc .> tmincc) && all(abs.(Δτc) .< tmaxΔτ)
 
         # record measurements
-        push!(tpairs, [tstations[i], ppairs[j,:event1], ppairs[j,:event2],
-                       read(fid, "Δτl")[idx], Δτc, read(fid, "Δτr")[idx],
-                       read(fid, "ccl")[idx], ccc, read(fid, "ccr")[idx]])
+        push!(tpairs, [tstations[i], ppairs[j,:event1], ppairs[j,:event2], read(fid, "Δτl")[idx], Δτc, read(fid, "Δτr")[idx], read(fid, "ccl")[idx], ccc, read(fid, "ccr")[idx]])
 
       end
 
@@ -100,10 +89,7 @@ function collectpairs(eqname, tstations, tintervals, tavgwidth, treffreq, tinvfr
   end
 
   # list of all selected P-wave pairs
-  ppairs = DataFrame(station=String[],
-                     event1=DateTime[], latitude1=Float64[], longitude1=Float64[],
-                     event2=DateTime[], latitude2=Float64[], longitude2=Float64[],
-                     Δτ=Float64[], cc=Float64[])
+  ppairs = DataFrame(station=String[], event1=DateTime[], latitude1=Float64[], longitude1=Float64[], event2=DateTime[], latitude2=Float64[], longitude2=Float64[], Δτ=Float64[], cc=Float64[])
 
   # find all pairs that were selected
   for i = 1 : length(pstations)
