@@ -1,13 +1,16 @@
 pstation,event1,event2,reason
 GE.GSI..BHZ,2007-10-27T18:35:15,2007-10-27T18:38:04,self-repeater that is not removed
-MY.KUM..BHZ,2005-05-04T15:07:29,2009-01-16T10:28:37,origin time correction inconsistent with PSI
-MY.KUM..BHZ,2005-08-19T13:05:09,2009-01-16T10:28:37,origin time correction inconsistent with PSI
-MY.KUM..BHZ,2009-01-14T22:46:09,2012-10-31T09:56:27,origin time correction inconsistent with PSI
-MY.KUM..BHZ,2009-01-14T22:46:09,2013-05-15T19:59:43,origin time correction inconsistent with PSI
-MY.KUM..BHZ,2009-01-14T22:46:09,2016-09-18T09:35:26,origin time correction inconsistent with PSI
-MY.KUM..BHZ,2005-02-27T17:42:42,2009-01-14T22:46:09,origin time correction inconsistent with PSI
-MY.KUM..BHZ,2005-04-27T06:31:42,2009-01-14T22:46:09,origin time correction inconsistent with PSI
-MY.KUM..BHZ,2008-03-23T14:36:34,2009-01-14T22:46:09,origin time correction inconsistent with PSI
+MY.KUM..BHZ,2005-02-27T17:42:42,2009-01-14T22:46:09,involves suspect event
+MY.KUM..BHZ,2005-04-27T06:31:42,2009-01-14T22:46:09,involves suspect event
+MY.KUM..BHZ,2005-05-04T15:07:29,2009-01-16T10:28:37,involves suspect event
+MY.KUM..BHZ,2005-08-19T13:05:09,2009-01-16T10:28:37,involves suspect event
+MY.KUM..BHZ,2006-08-30T01:57:17,2009-01-14T22:46:09,involves suspect event
+MY.KUM..BHZ,2008-03-23T14:36:34,2009-01-14T22:46:09,involves suspect event
+MY.KUM..BHZ,2009-01-14T22:46:09,2012-10-31T09:56:27,involves suspect event
+MY.KUM..BHZ,2009-01-14T22:46:09,2013-05-15T19:59:43,involves suspect event
+MY.KUM..BHZ,2009-01-14T22:46:09,2014-01-31T19:19:45,invovles suspect event
+MY.KUM..BHZ,2009-01-14T22:46:09,2016-09-18T09:35:26,involves suspect event
+MY.KUM..BHZ,2009-01-14T22:46:09,2017-12-25T03:38:12,invovles suspect event
 PS.PSI..BHZ,2005-02-05T18:07:16,2010-10-10T14:56:30,two cycles skipped
 PS.PSI..BHZ,2005-03-08T00:06:58,2010-10-10T14:56:30,two cycles skipped
 PS.PSI..BHZ,2010-10-10T14:56:30,2013-12-29T00:10:14,two cycles skipped
