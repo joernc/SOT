@@ -2,15 +2,15 @@ using HDF5, LinearAlgebra, PyPlot, NCDatasets, Statistics, Dates, Printf
 
 # load time series
 t8 = DateTime(2000, 1, 1) .+ Millisecond.(h5read("results/nias_tm_H08.h5", "t"))
-td = DateTime(2000, 1, 1) .+ Millisecond.(h5read("results/nias_DGAR.h5", "t"))
+td = DateTime(2000, 1, 1) .+ Millisecond.(h5read("results/nias_isc_DGAR.h5", "t"))
 τ8 = h5read("results/nias_tm_H08.h5", "τ")
-τd = h5read("results/nias_DGAR.h5", "τ")
+τd = h5read("results/nias_isc_DGAR.h5", "τ")
 eτ8 = h5read("results/nias_tm_H08.h5", "eτ")
-eτd = h5read("results/nias_DGAR.h5", "eτ")
+eτd = h5read("results/nias_isc_DGAR.h5", "eτ")
 
 # load ECCO time series
 τecco8 = h5read("results/nias_tm_H08.h5", "τecco")
-τeccod = h5read("results/nias_DGAR.h5", "τecco")
+τeccod = h5read("results/nias_isc_DGAR.h5", "τecco")
 
 # gaps
 gaps8 = [Date(2004, 1, 1), Date(2007, 1, 1), Date(2009, 7, 1), Date(2011, 1, 1), Date(2020, 1, 1)]

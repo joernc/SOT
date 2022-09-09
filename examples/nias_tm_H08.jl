@@ -154,6 +154,31 @@ y = [reshape(vcat([(tpairs.Δτ[i])' for i = 1:nt]...), l*nt); ppairs.Δτ]
 # invert
 a = P*E'*inv(N)*y
 
+# plot residuals with and without smoothing
+n1 = y - E*a
+n2 = y - E*(E\y)
+b = -0.16:0.005:0.16
+@assert all((b[1] .< n1 .< b[end]) .& (b[1] .< n2 .< b[end]))
+fig, ax = subplots(2, l+1; sharex=true, sharey=true)
+for i = 1:l
+  ax[1,i].hist(n1[(i-1)*nt+1:i*nt]; bins=b)
+  ax[2,i].hist(n2[(i-1)*nt+1:i*nt]; bins=b)
+  ax[1,i].set_title("T wave, freq. $i")
+  ax[2,i].set_title("T wave, freq. $i")
+end
+ax[1,l+1].hist(n1[l*nt+1:l*nt+np]; bins=b)
+ax[2,l+1].hist(n2[l*nt+1:l*nt+np]; bins=b)
+ax[1,l+1].set_title("P wave")
+ax[2,l+1].set_title("P wave")
+ax[1,1].set_yscale("log")
+ax[1,1].set_ylabel("count")
+ax[2,1].set_ylabel("count")
+ax[2,1].set_xlabel("residual (s)")
+ax[2,2].set_xlabel("residual (s)")
+ax[2,3].set_xlabel("residual (s)")
+ax[2,4].set_xlabel("residual (s)")
+fig.tight_layout()
+
 # extract trends
 trends = a[(l+1)*m+1:(l+1)*m+l]
 Ptrends = P[(l+1)*m+1:(l+1)*m+l,(l+1)*m+1:(l+1)*m+l]
