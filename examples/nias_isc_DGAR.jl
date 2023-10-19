@@ -38,7 +38,7 @@ tmincc = [0.6, 0.5]
 
 # excluded time period: before 2004-12-01
 # TODO: include more recent data?
-excludetimes = [[Date(2001, 1, 1) Date(2004, 12, 1)], [Date(2018, 12, 15) Date(2022, 1, 1)]]
+excludetimes = [[Date(2001, 1, 1) Date(2004, 12, 1)], [Date(2018, 1, 1) Date(2022, 1, 1)]]
 
 # manually exclude pairs
 excludepairs = CSV.read("data/catalogs/nias_isc_DGAR_exclude.csv", DataFrame)
@@ -149,10 +149,9 @@ ax[2,l+1].set_title("P wave")
 ax[1,1].set_yscale("log")
 ax[1,1].set_ylabel("count")
 ax[2,1].set_ylabel("count")
-ax[2,1].set_xlabel("residual (s)")
-ax[2,2].set_xlabel("residual (s)")
-ax[2,3].set_xlabel("residual (s)")
-ax[2,4].set_xlabel("residual (s)")
+for i = 1:l+1
+  ax[2,l].set_xlabel("residual (s)")
+end
 fig.tight_layout()
 
 # extract trends
