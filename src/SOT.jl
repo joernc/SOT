@@ -1,12 +1,12 @@
 module SOT
 
-using Seis, SeisIO, LightXML, CSV, DataFrames, HDF5, Dates
+using SeisIO, LightXML, CSV, DataFrames, HDF5, Dates
 using PyPlot, PyCall, Printf, ProgressMeter
 using LinearAlgebra, SparseArrays, FFTW, Statistics, DSP
 
-export downloadpwaves, cutpwaves, findpairs
+export downloadseisdata, cutpwaves, measurepairs
 export twavepick
-export collectpairs, invert, correctcycleskipping, lineartrend
+export collectpairs, invert, correctcycleskipping, lineartrend, regulargrid, estimatetrend
 
 include("pwaves.jl")
 include("twaves.jl")

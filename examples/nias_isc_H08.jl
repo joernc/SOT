@@ -1,7 +1,4 @@
-using .SOT, PyPlot, Printf, Dates, LinearAlgebra, Statistics, SparseArrays, HDF5, Interpolations, DataFrames, CSV
-
-# TODO: resolve clock errors in H08
-# TODO: resolve difference with DGAR
+using SOT, PyPlot, Printf, Dates, LinearAlgebra, Statistics, SparseArrays, HDF5, Interpolations, DataFrames, CSV
 
 # identifier for experiment
 eqname = "nias_isc"
@@ -46,19 +43,19 @@ excludepairs = CSV.read("data/catalogs/nias_isc_H08_exclude.csv", DataFrame)
 h = 5e3
 
 # download P-wave data
-SOT.downloadseisdata(eqname, pstations; src=psrc)
+downloadseisdata(eqname, pstations; src=psrc)
 
 # cut and filter P waveforms
-SOT.cutpwaves(eqname, pstations, pintervals, pfreqbands)
+cutpwaves(eqname, pstations, pintervals, pfreqbands)
 
 # find P-wave pairs
-SOT.findpairs(eqname, pstations, pintervals, pfreqbands)
+findpairs(eqname, pstations, pintervals, pfreqbands)
 
 # measure T-wave lags Δτ
-SOT.twavepick(eqname, tstations, tintervals, tavgwidth, treffreq, pstations, pintervals, pfreqbands)
+twavepick(eqname, tstations, tintervals, tavgwidth, treffreq, pstations, pintervals, pfreqbands)
 
 # collect usable pairs
-tpairs, ppairs = SOT.collectpairs(eqname, tstations, tintervals, tavgwidth, treffreq, tinvfreq, tmincc, pstations, pintervals, pfreqbands; excludetimes, excludepairs)
+tpairs, ppairs = collectpairs(eqname, tstations, tintervals, tavgwidth, treffreq, tinvfreq, tmincc, pstations, pintervals, pfreqbands; excludetimes, excludepairs)
 
 # number of good T- and P-wave pairs
 nt = size(tpairs, 1)
@@ -107,10 +104,10 @@ V /= sqrt(Δz/h)
 σsemiannual = 1e-3*[15, 10, 5]
 
 # get inversion matrices
-t, E, R, N, P, D = SOT.invert(tpairs, ppairs, λ, σc, σn, σp, U, Λ, Δz, h; σtrend, σannual, σsemiannual)
+t, E, R, N, P, D = invert(tpairs, ppairs, λ, σc, σn, σp, U, Λ, Δz, h; σtrend, σannual, σsemiannual)
 
 # make cycle-skipping correction
-tpairs.Δτ = SOT.correctcycleskipping(tpairs, ppairs, E, R, N, P, m)
+tpairs.Δτ = correctcycleskipping(tpairs, ppairs, E, R, N, P, m)
 
 # collect delays into data vector
 y = [reshape(vcat([(tpairs.Δτ[i])' for i = 1:nt]...), l*nt); ppairs.Δτ]
@@ -220,7 +217,7 @@ cargo = τargo*T'
 cecco = τecco*T'
 
 # estimate ECCO and Argo trends
-Et, Rxxt, Rnnt, Pt, Mt = SOT.estimatetrend(td, λ, σc, σc, σtrend, σannual, σsemiannual)
+Et, Rxxt, Rnnt, Pt, Mt = estimatetrend(td, λ, σc, σc, σtrend, σannual, σsemiannual)
 Tt = h*kron(I(6), U*Diagonal(Λ))
 
 # Argo trends
@@ -302,7 +299,7 @@ cecco .-= xt[1:l]'
 @printf("ECCO:    %+3.1f±%3.1f %+3.1f±%3.1f %2.0f±%1.0f %2.0f±%1.0f %2.0f±%1.0f %2.0f±%1.0f\n", SOT.meanyear*1e3*reshape([ctrendsecco[1:2]';2ectrendsecco[1:2]'], 4)..., 1e3*reshape([cannualsecco[1:2]'; 2ecannualsecco[1:2]'], 4)..., 1e3*reshape([csemiannualsecco[1:2]'; 2ecsemiannualsecco[1:2]'], 4)...,)
 
 # temperature trend profile
-ETt, RxxTt, RnnTt, PTt, MTt = SOT.estimatetrend(td, λ, [σc[1]], [σc[1]], [σtrend[1]], [σannual[1]], [σsemiannual[1]])
+ETt, RxxTt, RnnTt, PTt, MTt = estimatetrend(td, λ, [σc[1]], [σc[1]], [σtrend[1]], [σannual[1]], [σsemiannual[1]])
 Ttrendargo = [(PTt*ETt'*(RnnTt\Targo[:,i]))[2] for i = 1:size(Targo, 2)]
 
 # save catalogs of used pairs
