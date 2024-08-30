@@ -119,6 +119,7 @@ function BFGS(f,x0,∇tol,maxiter; xrtol=0)
     return xk,Hk
 end
 
+""" get E matrix """
 function getE(tpairs,ppairs,tstation,pstations;hydro=false,bathy=false)
     l = 1
 
@@ -185,7 +186,7 @@ function getE(tpairs,ppairs,tstation,pstations;hydro=false,bathy=false)
     end
 end
 
-
+""" loglikelihood function """
 function loglikelihood(x, y, σtrend, σannual, σsemiannual, t, θ, E, Ecs, Esn, nt, np;nλt=1,cgrid=0,θgrid=0,stn6=0,Ecsh=I,Esnh=I,Eb=I,hydro=false,bathy=false,grad=true)
 
     σtrend /= meanyear
@@ -404,7 +405,7 @@ function getazimuth(tpairs,ppairs,stalon,stalat,evtlon,evtlat)
     return xevent,yevent,θevent
 end
 
-# CENTRAL FINITE DIFFERENCE CALCULATION
+""" CENTRAL FINITE DIFFERENCE CALCULATION """
 function grad(f,x)
     h = cbrt(eps())
     d = length(x)
@@ -423,7 +424,7 @@ function grad(f,x)
     return nabla 
 end
 
-# CENTRAL FINITE DIFFERENCE CALCULATION
+""" CENTRAL FINITE DIFFERENCE CALCULATION """
 function hess(f,x)
     h = cbrt(eps())
     d = length(x)
@@ -444,7 +445,7 @@ function hess(f,x)
     return 0.5*(hess + hess') 
 end
 
-# BACKTRACK LINE SEARCH WITH WOLFE CONDITIONS
+""" BACKTRACK LINE SEARCH WITH WOLFE CONDITIONS """
 function line_search(f,∇f,x,p,∇)
     αi = 1
     ϕ(α) = f(x+α*p)

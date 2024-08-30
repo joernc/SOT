@@ -249,7 +249,7 @@ function invert(tpairs, ppairs, λ, σc, σn, σp, U, Λ, Δz, h; σtrend=0, σa
 
 end
 
-### with model covariance
+""" invertion with model covariance """
 function invert_gpcov(tpairs, ppairs, tstation, pstations, evtpos, σc,σp,σs,σn,σnp,σh,lags,ctau; σtrend=0, σannual=0, σsemiannual=0)
 
   # number of frequencies
@@ -361,7 +361,7 @@ function invert_gpcov(tpairs, ppairs, tstation, pstations, evtpos, σc,σp,σs,�
 
 end
 
-### with model covariance and 1 frequency
+""" inversion with model covariance and 1 frequency """
 function invert_gpcov1f(tpairs, ppairs, tstation, pstations, evtpos, λt, λθ, στ, σx, σh, σn, σnp, σp; σtrend=0, σannual=0, σsemiannual=0, σθtrend=0)
 
   # number of frequencies
@@ -652,7 +652,7 @@ function correctcycleskipping(tpairs, ppairs, E, Rxx, Rnn, P, m)
 
 end
 
-### return normalized residuals z
+""" cycleskipping correction with return of normalized residuals z """
 function correctcycleskipping_returnz(eqname, tstations, tpairs, ppairs, E, Rxx, Rnn, invR, P, m)
   
   # number of frequencies
@@ -839,7 +839,7 @@ function correctcycleskipping_returnz(eqname, tstations, tpairs, ppairs, E, Rxx,
 
 end
 
-### return normalized residuals z with 1 frequency and 2 possible right cycle skips
+""" cycleskipping correction return normalized residuals z with 1 frequency and 2 possible right cycle skips"""
 function correctcycleskipping_1f2r(eqname, tstations, tpairs, ppairs, E, Rxx, Rnn, P, m; l2=false)
   
   # number of frequencies
