@@ -121,7 +121,7 @@ function collectpairs(eqname, tstations, tintervals, tavgwidth, treffreq, tinvfr
 end
 
 """
-    invert(tpairs, ppairs; timescale=NaN)
+    invert(tpairs, ppairs, λ, σc, σn, σp, U, Λ, Δz, h; σtrend=0, σannual=0, σsemiannual=0, cov_method=:simple, tstation=nothing, pstations=nothing, σs=0, σnp=0, σh=0, lags=nothing, ctau=nothing)
 
 Set up inversion of the travel time changes between events ``Δτ`` for travel time anomalies
 ``τ`` relative to an arbitrary but common reference. Returns the unique events `t`, the
@@ -163,8 +163,22 @@ A = P*E'
   σx: solution standard deviation
   σn: measurement noise (s)
   σp: origin time error (s)
+  U: SVD of simple spatial covariance matrix
+  Λ: singular values of simple spatial covariance matrix
+  h: reference depth (m)
+  σtrend: standard deviation of trend (s)
+  σannual: standard deviation of annual cycle (s)
+  σsemiannual: standard deviation of semi-annual cycle (s)
+  cov_method: method for calculating covariance matrix, can be `:simple` or `:complex`
+  tstation: name of T-wave station (optional)
+  pstations: names of P-wave stations (optional)
+  σs: standard deviation of source-induced error (s)
+  σnp: standard deviation of p-wave cross-correlation error (s)
+  σh: standard deviation of hydrophone-induced error (s)
+  lags: lags for model correlation interpolation (days)
+  ctau: correlation for model correlation interpolation (s^2)
 """
-function invert(tpairs, ppairs, λ, σc, σn, σp, U, Λ, Δz, h; σtrend=0, σannual=0, σsemiannual=0)
+function invert(tpairs, ppairs, λ, σc, σn, σp, U, Λ, h; σtrend=0, σannual=0, σsemiannual=0, cov_method=:simple, tstation=nothing, pstations=nothing, σs=0, σnp=0, σh=0, lags=nothing, ctau=nothing)
 
   # number of frequencies
   l = length(tpairs.Δτc[1])
@@ -192,6 +206,27 @@ function invert(tpairs, ppairs, λ, σc, σn, σp, U, Λ, Δz, h; σtrend=0, σa
   pidx2 = indexin(ppairs.event2, t)
   Xp = sparse([1:np; 1:np], [pidx1; pidx2], [-ones(np); ones(np)])
 
+  if cov_method == :complex
+    ppairs.avglat = 0.5(ppairs.latitude1+ppairs.latitude2)
+    ppairs.avglon = 0.5(ppairs.longitude1+ppairs.longitude2)
+    leftjoin!(ppairs, pstations, on=:station)
+    ppazms = azimuth.(ppairs.slat,ppairs.slon,ppairs.avglat,ppairs.avglon)
+    Xpcs = sparse([1:np; 1:np], [pidx1; pidx2], [-cosd.(ppazms); cosd.(ppazms)])
+    Xpsn = sparse([1:np; 1:np], [pidx1; pidx2], [-sind.(ppazms); sind.(ppazms)])
+    ppairs = select(ppairs, [:event1, :event2, :avglat, :avglon])
+    unique!(ppairs)
+    tpairs = select(tpairs, [:event1, :event2])
+    leftjoin!(tpairs, ppairs, on=[:event1, :event2])
+    tpazms = azimuth.(tstation[1],tstation[2],tpairs.avglat,tpairs.avglon)
+    Xtcs = sparse([1:nt; 1:nt], [tidx1; tidx2], [-cosd.(tpazms); cosd.(tpazms)])
+    Xtsn = sparse([1:nt; 1:nt], [tidx1; tidx2], [-sind.(tpazms); sind.(tpazms)])
+  
+    Rcsn = [[Xtcs for i = 1:l]...;Xpcs]*[[Xtcs for i = 1:l]...;Xpcs]'
+    Rcsn = Rcsn + [[Xtsn for i = 1:l]...;Xpsn]*[[Xtsn for i = 1:l]...;Xpsn]'
+    Rcsnh = [[Xtcs for i = 1:l]...;0*Xpcs]*[[Xtcs for i = 1:l]...;0*Xpcs]'
+    Rcsnh = Rcsnh + [[Xtsn for i = 1:l]...;0*Xpsn]*[[Xtsn for i = 1:l]...;0*Xpsn]'
+  end
+  
   # full design matrix
   E = blockdiag([Xt for i = 1:l]..., Xp)
 
@@ -207,11 +242,23 @@ function invert(tpairs, ppairs, λ, σc, σn, σp, U, Λ, Δz, h; σtrend=0, σa
   # covariance matrix assuming no correlation between singular vector expansion coefficients
   R = [T*kron(spdiagm(σc.^2), C)*T' zeros(l*m, m); zeros(m, (l+1)*m)] + σp^2*kron(sparse(ones(l+1, l+1)), I(m))
 
+  if cov_method == :complex
+    Δtrd = tr.-tr'
+    C = []
+    for i = 1:6
+      cij = ctau[:,i]
+      interp_linear = linear_interpolation(lags, cij, extrapolation_bc=0)
+      push!(C,interp_linear.(Δtrd))
+    end
+    C = Symmetric([σc[1]^2*C[1] σc[2]^2*C[2] σc[3]^2*C[3]; σc[2]^2*C[2]' σc[4]^2*C[4] σc[5]^2*C[5]; σc[3]^2*C[3]' σc[5]^2*C[5]' σc[6]^2*C[6]])
+    R = [C zeros(l*m, m); zeros(m, (l+1)*m)] + σp^2*kron(sparse(ones(l+1, l+1)), I(m))
+  end
+
   # add trend if desired
   if !(σtrend == 0)
     tm = tr[1]+(tr[m]-tr[1])/2
     E = [E [kron(I(l), Xt*(tr.-tm)); zeros(np, l)]]
-    T = h*U*Diagonal(Λ)
+    T = cov_method == :simple ? h*U*Diagonal(Λ) : I
     R = [R zeros(size(R, 1), l); zeros(l, size(R, 2)) T*spdiagm(σtrend.^2)*T']
     D = [D kron(I(l), tr.-tm)]
   end
@@ -220,7 +267,7 @@ function invert(tpairs, ppairs, λ, σc, σn, σp, U, Λ, Δz, h; σtrend=0, σa
   if !(σannual == 0)
     ω = 2π/SOT.meanyear
     E = [E [kron(I(l), Xt*cos.(ω*tr)) kron(I(l), Xt*sin.(ω*tr)); zeros(np, 2l)]]
-    T = h*U*Diagonal(Λ)
+    T = cov_method == :simple ? h*U*Diagonal(Λ) : I
     R = [R zeros(size(R, 1), 2l); zeros(2l, size(R, 2)) kron(I(2), T*spdiagm(σannual.^2/2)*T')]
     D = [D kron(I(l), cos.(ω*tr)) kron(I(l), sin.(ω*tr))]
   end
@@ -229,13 +276,18 @@ function invert(tpairs, ppairs, λ, σc, σn, σp, U, Λ, Δz, h; σtrend=0, σa
   if !(σsemiannual == 0)
     ω = 4π/SOT.meanyear
     E = [E [kron(I(l), Xt*cos.(ω*tr)) kron(I(l), Xt*sin.(ω*tr)); zeros(np, 2l)]]
-    T = h*U*Diagonal(Λ)
+    T = cov_method == :simple ? h*U*Diagonal(Λ) : I
     R = [R zeros(size(R, 1), 2l); zeros(2l, size(R, 2)) kron(I(2), T*spdiagm(σsemiannual.^2/2)*T')]
     D = [D kron(I(l), cos.(ω*tr)) kron(I(l), sin.(ω*tr))]
   end
 
   # noise covariance
   N = σn^2*I
+
+  if cov_method == :complex
+    N = σn^2*spdiagm([ones(l*nt);zeros(np)])+σs^2*Rcsn+σh^2*Rcsnh
+    N += σnp^2*spdiagm([zeros(l*nt);ones(np)])
+  end
 
   # Gauss–Markov solution covariance matrix
   P = inv(inv(Array(R)) + E'*inv(N)*E)
@@ -245,124 +297,15 @@ function invert(tpairs, ppairs, λ, σc, σn, σp, U, Λ, Δz, h; σtrend=0, σa
   # Uncertainty:
   #   e = sqrt.(diag(D*P*D'))
 
-  return t, E, R, N, P, D
-
+  if cov_method == :complex
+    return t, E, R, N, P, D, inv(Array(R))
+  else
+    return t, E, R, N, P, D
+  end
 end
 
-""" invertion with model covariance """
-function invert_gpcov(tpairs, ppairs, tstation, pstations, evtpos, σc,σp,σs,σn,σnp,σh,lags,ctau; σtrend=0, σannual=0, σsemiannual=0)
-
-  # number of frequencies
-  l = length(tpairs.Δτc[1])
-
-  # find unique events
-  t = sort(unique([tpairs.event1; tpairs.event2]))
-
-  # real time (days)
-  tr = Dates.value.(t - DateTime(2000, 1, 1, 12, 0, 0))/1000/3600/24
-
-  # number of T- and P-wave pairs
-  nt = size(tpairs, 1)
-  np = size(ppairs, 1)
-
-  # number of unique events
-  m = length(t)
-
-  # T-wave pair matrix
-  tidx1 = indexin(tpairs.event1, t)
-  tidx2 = indexin(tpairs.event2, t)
-  Xt = sparse([1:nt; 1:nt], [tidx1; tidx2], [-ones(nt); ones(nt)])
-
-  # P-wave pair matrix
-  pidx1 = indexin(ppairs.event1, t)
-  pidx2 = indexin(ppairs.event2, t)
-  Xp = sparse([1:np; 1:np], [pidx1; pidx2], [-ones(np); ones(np)])
-  
-  ppairs.avglat = 0.5(ppairs.latitude1+ppairs.latitude2)
-  ppairs.avglon = 0.5(ppairs.longitude1+ppairs.longitude2)
-  leftjoin!(ppairs, pstations, on=:station)
-  ppazms = azimuth.(ppairs.slat,ppairs.slon,ppairs.avglat,ppairs.avglon)
-  #@printf("selpairs: %s\n%s\n%s\n%s\n",selpairs.slat[1:5],selpairs.slon[1:5],selpairs.avglat[1:5],selpairs.avglon[1:5])
-  Xpcs = sparse([1:np; 1:np], [pidx1; pidx2], [-cosd.(ppazms); cosd.(ppazms)])
-  Xpsn = sparse([1:np; 1:np], [pidx1; pidx2], [-sind.(ppazms); sind.(ppazms)])
-  ppairs = select(ppairs, [:event1, :event2, :avglat, :avglon])
-  unique!(ppairs)
-  tpairs = select(tpairs, [:event1, :event2])
-  leftjoin!(tpairs, ppairs, on=[:event1, :event2])
-  tpazms = azimuth.(tstation[1],tstation[2],tpairs.avglat,tpairs.avglon)
-  Xtcs = sparse([1:nt; 1:nt], [tidx1; tidx2], [-cosd.(tpazms); cosd.(tpazms)])
-  Xtsn = sparse([1:nt; 1:nt], [tidx1; tidx2], [-sind.(tpazms); sind.(tpazms)])
-
-  Rcsn = [[Xtcs for i = 1:l]...;Xpcs]*[[Xtcs for i = 1:l]...;Xpcs]'
-  Rcsn = Rcsn + [[Xtsn for i = 1:l]...;Xpsn]*[[Xtsn for i = 1:l]...;Xpsn]'
-  Rcsnh = [[Xtcs for i = 1:l]...;0*Xpcs]*[[Xtcs for i = 1:l]...;0*Xpcs]'
-  Rcsnh = Rcsnh + [[Xtsn for i = 1:l]...;0*Xpsn]*[[Xtsn for i = 1:l]...;0*Xpsn]'
-
-  # full design matrix
-  E = blockdiag([Xt for i = 1:l]..., Xp)
-
-  # difference matrix (T- minus P-anomalies)
-  D = [I(l*m) vcat([-I(m) for i = 1:l]...)]
-
-  # solution covariance in time
-  Δtrd = tr.-tr'
-  C = []
-  for i = 1:6
-    cij = ctau[:,i]
-    interp_linear = linear_interpolation(lags, cij, extrapolation_bc=0)
-    push!(C,interp_linear.(Δtrd))
-  end
-  C = Symmetric([σc[1]^2*C[1] σc[2]^2*C[2] σc[3]^2*C[3]; σc[2]^2*C[2]' σc[4]^2*C[4] σc[5]^2*C[5]; σc[3]^2*C[3]' σc[5]^2*C[5]' σc[6]^2*C[6]])
-  #C = Matrix([C[1] C[2] C[3]; C[2]' C[4] C[5]; C[3]' C[5]' C[6]])
-  #C = (C+C')/2
-
-  # covariance matrix assuming no correlation between singular vector expansion coefficients
-  R = [C zeros(l*m, m); zeros(m, (l+1)*m)] + σp^2*kron(sparse(ones(l+1, l+1)), I(m))
-
-  # add trend if desired
-  if !(σtrend == 0)
-    tm = tr[1]+(tr[m]-tr[1])/2
-    E = [E [kron(I(l), Xt*(tr.-tm)); zeros(np, l)]]
-    R = [R zeros(size(R, 1), l); zeros(l, size(R, 2)) spdiagm(σtrend.^2)]
-    D = [D kron(I(l), tr.-tm)]
-  end
-
-  # add annual cycle if desired
-  if !(σannual == 0)
-    ω = 2π/SOT.meanyear
-    E = [E [kron(I(l), Xt*cos.(ω*tr)) kron(I(l), Xt*sin.(ω*tr)); zeros(np, 2l)]]
-    R = [R zeros(size(R, 1), 2l); zeros(2l, size(R, 2)) kron(I(2), spdiagm(σannual.^2/2))]
-    D = [D kron(I(l), cos.(ω*tr)) kron(I(l), sin.(ω*tr))]
-  end
-
-  # add semi-annual cycle if desired
-  if !(σsemiannual == 0)
-    ω = 4π/SOT.meanyear
-    E = [E [kron(I(l), Xt*cos.(ω*tr)) kron(I(l), Xt*sin.(ω*tr)); zeros(np, 2l)]]
-    R = [R zeros(size(R, 1), 2l); zeros(2l, size(R, 2)) kron(I(2), spdiagm(σsemiannual.^2/2))]
-    D = [D kron(I(l), cos.(ω*tr)) kron(I(l), sin.(ω*tr))]
-  end
-
-  # noise covariance
-  N = σn^2*spdiagm([ones(l*nt);zeros(np)])+σs^2*Rcsn+σh^2*Rcsnh
-  N += σnp^2*spdiagm([zeros(l*nt);ones(np)])
-
-  invR = inv(Array(R))
-  # Gauss–Markov solution covariance matrix
-  P = inv(invR + E'*inv(Array(N))*E)
-  #P1 = E'*inv((Array(N)) + E*inv(Array(R))*E')*E
-
-  # Best estimate, subtracting T- and P-delays, adding trend and seasonal cycles:
-  #   τ = D*P*E'*inv(N)*y
-  # Uncertainty:
-  #   e = sqrt.(diag(D*P*D'))
-
-  return t, E, R, N, P, D, invR
-
-end
-
-""" inversion with model covariance and 1 frequency """
-function invert_gpcov1f(tpairs, ppairs, tstation, pstations, evtpos, λt, λθ, στ, σx, σh, σn, σnp, σp; σtrend=0, σannual=0, σsemiannual=0, σθtrend=0)
+""" inversion with complex covariance and 1 frequency, see invert() """
+function invert_1f(tpairs, ppairs, tstation, pstations, evtpos, λt, λθ, στ, σx, σh, σn, σnp, σp; σtrend=0, σannual=0, σsemiannual=0, σθtrend=0)
 
   # number of frequencies
   l = 1
@@ -488,13 +431,13 @@ function invert_gpcov1f(tpairs, ppairs, tstation, pstations, evtpos, λt, λθ, 
 end
 
 """
-    correctcycleskipping(tpairs, ppairs, E, S, P)
+    correctcycleskipping(tpairs, ppairs, E, Rxx, Rnn, P, m; source="nias", tstations="H08")
 
 Find cycle-skipping corrections. Applies corrections to adjacent maxima of the
 cross-correlation function whenever they reduce the cost function. Returns the corrected
-*T*-wave delays `Δτ`.
+*T*-wave delays `Δτ`, P-wave delays `Δτp`, and normalized residuals `zint`, `zinp`.
 """
-function correctcycleskipping(tpairs, ppairs, E, Rxx, Rnn, P, m)
+function correctcycleskipping(tpairs, ppairs, E, Rxx, Rnn, P, m; source="nias", tstations=["H08"], returnz=false)
   
   # number of frequencies
   l = length(tpairs.Δτc[1])
@@ -508,7 +451,14 @@ function correctcycleskipping(tpairs, ppairs, E, Rxx, Rnn, P, m)
   cca = cat(vcat(tpairs.ccl'...), vcat(tpairs.ccc'...), vcat(tpairs.ccr'...), dims=3)
 
   # invert for P-wave delays without smoothing
-  Δτp = E[1:nt,1:m]*(E[l*nt+1:l*nt+np,l*m+1:(l+1)*m]\ppairs.Δτ)
+  # Δτp = E[1:nt,1:m]*(E[l*nt+1:l*nt+np,l*m+1:(l+1)*m]\ppairs.Δτ)
+  @printf("origin correction w/ covariance...\n") 
+  invRp = inv(Array(Rxx[l*m+1:(l+1)*m,l*m+1:(l+1)*m]))
+  invNp = inv(Array(Rnn[l*nt+1:end,l*nt+1:end]))
+  # Gauss–Markov solution covariance matrix
+  Pp = inv(invRp + E[l*nt+1:end,l*m+1:(l+1)*m]'*invNp*E[l*nt+1:end,l*m+1:(l+1)*m])
+  τp = Pp*E[l*nt+1:end,l*m+1:(l+1)*m]'*invNp*ppairs.Δτ
+  Δτp = E[1:nt,1:m]*τp
 
   # use Gaussian mixture model with three members and shared covariance to find three
   # clusters of pairs, estimate parameters using an EM algorithm, perform initial cycle-
@@ -646,196 +596,22 @@ function correctcycleskipping(tpairs, ppairs, E, Rxx, Rnn, P, m)
   ax[2].set_title("after additional corrections")
   ax[2].set_title("(b)", loc="left")
   fig.tight_layout(w_pad=2)
+  fig.savefig(@sprintf("results/plots/%s_%s_cluster.pdf",source,tstations[1]))
 
   # return optimal delays
-  return collect(eachrow(reshape(y[1:l*nt], (nt, l))))
+  Δτ = collect(eachrow(reshape(y[1:l*nt], (nt, l))))
 
-end
-
-""" cycleskipping correction with return of normalized residuals z """
-function correctcycleskipping_returnz(eqname, tstations, tpairs, ppairs, E, Rxx, Rnn, invR, P, m)
-  
-  # number of frequencies
-  l = length(tpairs.Δτc[1])
-
-  # number of T- and P-wave pairs
-  nt = size(tpairs, 1)
-  np = size(ppairs, 1)
-
-  # collect the three delays and CCs
-  Δτa = cat(vcat(tpairs.Δτl'...), vcat(tpairs.Δτc'...), vcat(tpairs.Δτr'...), dims=3)
-  cca = cat(vcat(tpairs.ccl'...), vcat(tpairs.ccc'...), vcat(tpairs.ccr'...), dims=3)
-  
-  # inverses
-  iRnn = inv(Array(Rnn))
-  #iRxx = inv(Symmetric(Rxx))
-  #iRyy = inv(Array(E*Rxx*E' + Rnn))
-
-  # solution operator (x̃ = Ay)
-  A = P*E'*iRnn
-
-  # invert for P-wave delays without smoothing
-  @printf("origin correction w/ covariance...\n") 
-  invRp = inv(Array(Rxx[l*m+1:(l+1)*m,l*m+1:(l+1)*m]))
-  invNp = inv(Array(Rnn[l*nt+1:end,l*nt+1:end]))
-  # Gauss–Markov solution covariance matrix
-  Pp = inv(invRp + E[l*nt+1:end,l*m+1:(l+1)*m]'*invNp*E[l*nt+1:end,l*m+1:(l+1)*m])
-  τp = Pp*E[l*nt+1:end,l*m+1:(l+1)*m]'*invNp*ppairs.Δτ
-  Δτp = E[1:nt,1:m]*τp
-#  Δτp = E[1:nt,1:m]*(E[l*nt+1:l*nt+np,l*m+1:(l+1)*m]\ppairs.Δτ)
-
-  # use Gaussian mixture model with three members and shared covariance to find three
-  # clusters of pairs, estimate parameters using an EM algorithm, perform initial cycle-
-  # skipping correction by shifting left cluster to right and right cluster to left
-  x1 = [tpairs.Δτc[i][1] - Δτp[i] for i = 1:nt]
-  x2 = [tpairs.Δτc[i][1] - tpairs.Δτc[i][l] for i = 1:nt]
-  x = [x1 x2]
-  μ = [1 0.1; 0 0; -1 -0.1]
-  Λ = [0.2^2 0; 0 0.1^2]
-  τ = [0.05, 0.9, 0.05]
-  f(x, μ, Λ) = 1/sqrt((2π)^length(μ)*norm(Λ))*exp(-1/2*(x-μ)'*(Λ\(x-μ)))
-  T = nothing
-  for n = 1:100
-    T = [τ[j].*f(x[i,:], μ[j,:], Λ) for j=1:3, i=1:nt]
-    T ./= sum(T; dims=1)
-    τ = sum(T; dims=2)/nt
-    μ = sum([T[j,i]*x[i,k] for j=1:3, k=1:2, i=1:nt]; dims=3)[:,:,1]./sum(T; dims=2)
-    Λ = sum([T[j,i]*(x[i,:]-μ[j,:])*(x[i,:]-μ[j,:])' for i = 1:nt, j = 1:3])/nt
+  if returnz 
+    # Calculate normalized residuals
+    iCnt = inv(Symmetric(Matrix(Rnn[1:l*nt,1:l*nt])))
+    iCnp = inv(Symmetric(Matrix(Rnn[l*nt+1:end,l*nt+1:end])))
+    @printf("iCnt posdef: %s, iCnp posdef: %s\n",isposdef(iCnt),isposdef(iCnp))
+    zint = isposdef(iCnt) ? cholesky(iCnt).U*n[1:l*nt] : zeros(l*nt)
+    zinp = isposdef(iCnp) ? cholesky(iCnp).U*n[1+l*nt:end] : zeros(np)
+    return Δτ, Δτp, zint, zinp
+  else
+    return Δτ
   end
-  cs = [argmax(T[:,i]) for i = 1:nt]
-
-  # plot clusters used for initial correction
-  rc("font", size=8)
-  rc("axes", titlesize="medium")
-  fig, ax = subplots(1, 2, sharex=true, sharey=true, figsize=(190/25.4, 95/25.4))
-  for i = 1:3
-    ax[1].scatter(x[cs.==i,1], x[cs.==i,2], s=5)
-  end
-  xlim = round(maximum(abs.(ax[1].get_xlim())); digits=2)
-  ylim = round(maximum(abs.(ax[1].get_ylim())); digits=2)
-  ax[1].set_xlim(-xlim, xlim)
-  ax[1].set_ylim(-ylim, ylim)
-  ax[1].set_xlabel("low-frequency delay (s)")
-  ax[1].set_ylabel("differential delay (s)")
-  ax[1].set_title("after clustering")
-  ax[1].set_title("(a)", loc="left")
-
-  for i = 1:nt
-    if cs[i] != 2
-      s = @sprintf("%s %s\n", tpairs.event1[i], tpairs.event2[i])
-      printstyled(s, color=(cs[i]==1) ? :blue : :green)
-    end
-  end
-
-  # data vector using initial correction
-  y = [reshape([Δτa[i,j,cs[i]] for i = 1:nt, j = 1:l], l*nt); ppairs.Δτ]
-
-#  # residual operator
-#  R = I - E*A
-
-  # initial residuals and cost
-  x = A*y
-  n = y - E*x
-  r = n.^2
-  J = .5n'*iRnn*n + .5x'*invR*x
-
-  # cycle through T-wave pairs until no further corrections are made
-  i = 1
-  idx = nothing
-  while i ≤ nt
-
-    @printf("\r%4d", i)
-
-    # sort unique pairs by size of residuals
-    if i == 1
-      idx = sortperm(r[1:nt], rev=true)
-    end
-
-    # corrected this pair?
-    corrected = false
-
-    # trial correction(s)
-    if cs[idx[i]] == 1 || cs[idx[i]] == 3
-      dir = [2]
-    else
-      dir = [1, 3]
-    end
-
-    # go through trials
-    for j = dir
-
-      # check if probability of belonging to different cluster is at least 0.1%
-      if T[j,idx[i]] ≥ 1e-3
-
-        # swap out Δτ
-        y[idx[i].+(0:l-1)*nt] = Δτa[idx[i],:,j]
-
-        # new residuals and cost
-        x = A*y
-        n = y - E*x
-        rp = n.^2
-        Jp = .5n'*iRnn*n + .5x'*invR*x
-
-        # record if cost is reduced, revert otherwise
-        if Jp < J
-          cs[idx[i]] = j
-          J = Jp
-          r = copy(rp)
-          corrected = true
-          @printf("\r%4d %4d %d %7.5f %s %s\n", i, idx[i], j, 1e3J/(nt+np+m-2)/l,
-                  tpairs.event1[idx[i]], tpairs.event2[idx[i]])
-        else
-          y[idx[i].+(0:l-1)*nt] = Δτa[idx[i],:,cs[idx[i]]]
-        end
-
-      end
-    end
-
-    # move back to first pair if correction was made, advance otherwise
-    i = corrected ? 1 : i+1
-
-  end
-
-  @printf("\n")
-  @printf("Total number of T-wave pairs:            %4d\n", nt)
-  @printf("Number of pairs corrected to left max.:  %4d\n", sum(cs.==1))
-  @printf("Number of uncorrected pairs:             %4d\n", sum(cs.==2))
-  @printf("Number of pairs corrected to right max.: %4d\n", sum(cs.==3))
-
-  # plot clusters used for initial correction
-  Δτp = E[1:nt,1:m]*((A*y)[l*m+1:(l+1)*m])
-  x1 = [tpairs.Δτc[i][1] - Δτp[i] for i = 1:nt]
-  x2 = [tpairs.Δτc[i][1] - tpairs.Δτc[i][l] for i = 1:nt]
-  x = [x1 x2]
-  for i = 1:3
-    ax[2].scatter(x[cs.==i,1], x[cs.==i,2], s=5)
-  end
-  ax[2].set_xlabel("low-frequency delay (s)")
-  ax[2].set_title("after additional corrections")
-  ax[2].set_title("(b)", loc="left")
-  fig.tight_layout(w_pad=2)
-  fig.savefig(@sprintf("results/plots/%s_%s_cluster.pdf",eqname,tstations[1]))
-  
-  #Δy = y[1:l*nt] .- repeat(Δτp, outer = l)
-  #yh = E*A*y
-  #Δτph = E[1:nt,1:m]*(E[l*nt+1:l*nt+np,l*m+1:(l+1)*m]\yh[(l*nt+1):end])
-  #Δr = (Δy .- (yh[1:l*nt] .- repeat(Δτph, outer = l))).^2
-  x = A*y
-  n = y - E*x
-  #T = I(l*nt+np)-E*A
-  
-  #Cn = T*(Rnn+E*Rxx*E')*T'
-  iCnt = inv(Symmetric(Matrix(Rnn[1:l*nt,1:l*nt])))
-  iCnp = inv(Symmetric(Matrix(Rnn[l*nt+1:end,l*nt+1:end])))
-  #U,S,Vt = svd(Symmetric(Rxx-P)[1+l*m:(l+1)*m,1+l*m:(l+1)*m])
-  #iCo = inv(Matrix(Diagonal(diag(Rxx-P)[1+l*m:(l+1)*m])))
-  @printf("iCnt posdef: %s, iCnp posdef: %s\n",isposdef(iCnt),isposdef(iCnp))
-  zint = isposdef(iCnt) ? cholesky(iCnt).U*n[1:l*nt] : zeros(l*nt)
-  zinp = isposdef(iCnp) ? cholesky(iCnp).U*n[1+l*nt:end] : zeros(np)
-  #zio = Diagonal(sqrt.(S.^-1))*U'*x[1+l*m:(l+1)*m]
-
-  # return optimal delays
-  return collect(eachrow(reshape(y[1:l*nt], (nt, l)))), Δτp, zint, zinp
 
 end
 

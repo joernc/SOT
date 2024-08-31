@@ -62,10 +62,11 @@ ctau = h5read(fl, "covs")
 σs,σh = 0.03,0.03
 
 # get inversion matrices
-t, E, R, N, P, D, invR = SOT.invert_gpcov(tpairs, ppairs, tstalocs, pstalocs, evtpos, σc,σp,σs,σn,σnp,σh,lags,ctau; σtrend)
+t, E, R, N, P, D, invR = SOT.invert(tpairs, ppairs, 1, σc, σn, σp, I, I, 1; cov_method=:complex, tstation=tstalocs, pstations=pstalocs, σs, σnp,σh,lags,ctau, σtrend)
 
 # make cycle-skipping correction
-tpairs.Δτ,tpairs.Δτp,zint,zinp = SOT.correctcycleskipping_returnz(source, tstations, tpairs, ppairs, E, R, N, invR, P, m)
+returnz = true
+tpairs.Δτ,tpairs.Δτp,zint,zinp = SOT.correctcycleskipping(tpairs, ppairs, E, R, N, P, m; source, tstations, returnz)
 
 #CSV.write(@sprintf("results/pairs/%s_%s_tpairs.csv",source,tstations[1]), tpairs)
 
