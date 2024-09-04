@@ -157,7 +157,7 @@ for i in range(nx):
                     z = zp,),
                 attrs=dict(description=f"first {nmode} dynamical modes"),)
 
-            dst.to_netcdf(f"results/{model}/modes_mean_{model}_3d.nc")
+            dst.to_netcdf(f"data/{model}/modes_mean_{model}_3d.nc")
             break
     if mean:
         break
@@ -173,4 +173,4 @@ for i in range(nx):
                 lat = lat_e[jidx],
                 z = zp,),
             attrs=dict(description=f"first {nmode} dynamical modes"),)
-        dst.to_netcdf(f"results/ecco/modes_3d_{model}.nc")
+        dst.to_netcdf(f"data/ecco/modes_3d_{model}.nc")

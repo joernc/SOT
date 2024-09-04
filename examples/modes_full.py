@@ -161,9 +161,9 @@ for i in xidx:
                 z = zp,),
             attrs=dict(description=f"first {nmode} dynamical modes"),)
         if lat == None:
-            dst.to_netcdf(f"results/{model}/modes_mean_{model}.nc")
+            dst.to_netcdf(f"data/{model}/modes_mean_{model}.nc")
         else:
-            dst.to_netcdf(f"results/{model}/modes_mean_{model}_{lat:.0f}lat.nc")
+            dst.to_netcdf(f"data/{model}/modes_mean_{model}_{lat:.0f}lat.nc")
         break
 
 if not mean:
@@ -178,6 +178,6 @@ if not mean:
             z = zp,),
         attrs=dict(description=f"first {nmode} dynamical modes"),)
     if lat == None:
-        dst.to_netcdf(f"results/{model}/modes_full_{model}.nc")
+        dst.to_netcdf(f"data/{model}/modes_full_{model}.nc")
     else:
-        dst.to_netcdf(f"results/{model}/modes_full_{model}_{lat:.0f}lat.nc")
+        dst.to_netcdf(f"data/{model}/modes_full_{model}_{lat:.0f}lat.nc")

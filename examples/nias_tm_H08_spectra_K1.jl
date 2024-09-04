@@ -13,9 +13,9 @@ xidx = 0 .<= range .<= Lx
 nx = length(range[xidx])
 Δx = range[2] - range[1]
 Δz = depth[1] - depth[2]
-giofes = NCDataset("results/ofes/modes_mean_ofes.nc")["hn"][:,1:nmode]
+giofes = NCDataset("data/ofes/modes_mean_ofes.nc")["hn"][:,1:nmode]
 n2ofes = nanmean(replace(NCDataset("data/ofes/n2_Nias_H08_2005.nc")["n2"][:,xidx], missing=>NaN), 2)
-giecco = NCDataset("results/ecco/modes_mean_ecco.nc")["hn"][:,1:nmode]
+giecco = NCDataset("data/ecco/modes_mean_ecco.nc")["hn"][:,1:nmode]
 n2ecco = nanmean(replace(NCDataset("data/ecco/n2_Nias_H08_2005.nc")["n2"][:,xidx], missing=>NaN), 2)
 
 K = sum(h5read("data/temperature/nias_H08.h5", "K"), dims=2)[:,1,:]*Δx
@@ -38,7 +38,7 @@ println(Λo)
 println(Vo)
 
 
-fl = Dataset("results/ofes/KjdT_Nias_H08_2005.nc", "r")
+fl = Dataset("data/ofes/KjdT_Nias_H08_2005.nc", "r")
 τofes = Array{Float64}(replace(fl["hndsig1"][:,:], missing=>0))
 
 for i = 1:3

@@ -146,10 +146,10 @@ idx = 0 .<= range .<= 29e5
 nx = length(range[idx])
 Δx = range[2] - range[1]
 Δz = depth[1] - depth[2]
-giofes = NCDataset("results/ofes/modes_mean_ofes.nc")["hn"][:,1:nmode]
-n2ofes = nanmean(replace(NCDataset("data/ofes/n2_Nias_H08_2005.nc")["n2"][:,idx], missing=>NaN), 2)
-giecco = NCDataset("results/ecco/modes_mean_ecco.nc")["hn"][:,1:nmode]
-n2ecco = nanmean(replace(NCDataset("data/ecco/n2_Nias_H08_2005.nc")["n2"][:,idx], missing=>NaN), 2)
+giofes = NCDataset("data/ofes/modes_mean_ofes.nc")["hn"][:,1:nmode]
+n2ofes = nanmean(replace(NCDataset("data/ofes/n2_Nias_H08_2005.nc")["n2"][:,xidx], missing=>NaN), 2)
+giecco = NCDataset("data/ecco/modes_mean_ecco.nc")["hn"][:,1:nmode]
+n2ecco = nanmean(replace(NCDataset("data/ecco/n2_Nias_H08_2005.nc")["n2"][:,xidx], missing=>NaN), 2)
 
 if Kgrid == "Gaussian"
   # kernels
