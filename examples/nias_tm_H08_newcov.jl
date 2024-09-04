@@ -43,7 +43,7 @@ tpairs.ccr = [[parse(Float64, s) for s in split(tpairs.ccr[i][2:end-1],", ")] fo
 
 ###
 model,Kgrid = "ecco","Gaussian"
-fl = @sprintf("results/covtau0_%s_%s.h5",model,Kgrid)
+fl = @sprintf("data/%s/covtau0_%s.h5",model,Kgrid)
 lags = h5read(fl, "lags")
 ctau = h5read(fl, "covs")
 
