@@ -69,7 +69,7 @@ function downloadseisdata(eqname, stations; src="IRIS", paircat=false)
               # station longitude
               fid["longitude"] = sta.longitude
               # start time in microseconds since 1970-01-01T00:00:00
-              fid["starttime"] = Int(round(1000*(st[1].stats.starttime - obspy.UTCDateTime(1970, 1, 1, 0, 0, 0)).real))
+              fid["starttime"] = Int(round(1e6*(st[1].stats.starttime - obspy.UTCDateTime(1970, 1, 1, 0, 0, 0)).real))
               # sampling frequency (in Hz)
               fid["fs"] = st[1].stats.delta
               # trace
