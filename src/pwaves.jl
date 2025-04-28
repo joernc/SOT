@@ -14,112 +14,82 @@ channels) specified in `stations`. Currently, one full hour after the event is d
 """
 function downloadseisdata(eqname, stations; src="IRIS", paircat=false)
 
-  if paircat
+  obspy = pyimport("obspy")
+  fdsn = pyimport("obspy.clients.fdsn")
+  client = fdsn.Client("IRIS")
 
+  if paircat
     # load pair catalog
     pairs = DataFrame(CSV.File(@sprintf("data/catalogs/%s.csv", eqname)))
-
     # build catalog of all unique events in pair catalog
     events1 = pairs[:,[1;3:5]]
     events2 = pairs[:,[2;6:8]]
     rename!(events1, :event1=>:time, :latitude1=>:latitude, :longitude1=>:longitude, :depth1=>:depth)
     rename!(events2, :event2=>:time, :latitude2=>:latitude, :longitude2=>:longitude, :depth2=>:depth)
     events = sort(unique(vcat(events1, events2)))
-
   else
-
     # load event catalog
     events = DataFrame(CSV.File(@sprintf("data/catalogs/%s.csv", eqname)))
-
   end
 
   # loop over stations
   for (i, s) in enumerate(stations)
-
     # select source (station-dependent if given as vector)
     if typeof(src) == Vector{String}
       source = src[i]
     else
       source = src
     end
-
+    # get station info
+    sta = client.get_stations(network=split(s, ".")[1], station=split(s, ".")[2])[1][1]
     # path to P-waveform directory
     path = seisdatadir(eqname, s)
-
     # create directory if needed
     mkpath(path)
-
     # loop over events
     for e in eachrow(events)
-
       # formatted date and time
       fmttime = Dates.format(e.time, "yyyy-mm-ddTHH:MM:SS.ss")
-
       # filename
       filename = @sprintf("%s/%s.h5", path, fmttime)
-
       # check if file exists already
       if !isfile(filename)
-
         @printf("Downloading %s %s ... ", s, fmttime)
-
         try
-
           # download data
-          S = get_data("FDSN", s; s=string(e.time), t=string(e.time + Hour(1)), src=source, xf=tempname(cleanup=true))
-
+          st = client.get_waveforms(split(s, ".")..., obspy.UTCDateTime(string(e.time)), obspy.UTCDateTime(string(e.time + Hour(1))); attach_response=true)
           # check if there are no gaps
-          if length(S) == 1 && size(S[1].t, 1) > 0
-
+          if length(st.traces) == 1 && size(st[1].data, 1) > 0
             # remove instrument response
-            remove_resp!(S)
-
+            st.remove_response()
             # write to file
             h5open(filename, "w") do fid
-
               # station latitude
-              fid["latitude"] = S[1].loc.lat
-
+              fid["latitude"] = sta.latitude
               # station longitude
-              fid["longitude"] = S[1].loc.lon
-
+              fid["longitude"] = sta.longitude
               # start time in microseconds since 1970-01-01T00:00:00
-              fid["starttime"] = S[1].t[1,2]
-
+              fid["starttime"] = Int(round(1000*(st[1].stats.starttime - obspy.UTCDateTime(1970, 1, 1, 0, 0, 0)).real))
               # sampling frequency (in Hz)
-              fid["fs"] = S[1].fs
-              
+              fid["fs"] = st[1].stats.delta
               # trace
-              fid["trace"] = S[1].x
-
+              fid["trace"] = st[1].data
             end
-
             @printf("done\n")
-
           else
-
             # create empty file, so download is not attempted again
             touch(filename)
-
-            @printf("%d gap(s)\n", length(S)-1)
-
+            @printf("%d gap(s)\n", length(st.traces)-1)
           end
-
         catch y
-
           # create empty file, so download is not attempted again
-          if isa(y, LightXML.XMLParseError)
+          if isa(y, PyCall.PyError) && y.T == obspy.clients.fdsn.header.FDSNNoDataException
             touch(filename)
           end
-
           @printf("failed\n")
-
         end
-    
       end
-  
     end
-  
   end
 
 end
