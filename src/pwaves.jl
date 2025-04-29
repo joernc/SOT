@@ -71,7 +71,7 @@ function downloadseisdata(eqname, stations; src="IRIS", paircat=false)
               # start time in microseconds since 1970-01-01T00:00:00
               fid["starttime"] = Int(round(1e6*(st[1].stats.starttime - obspy.UTCDateTime(1970, 1, 1, 0, 0, 0)).real))
               # sampling frequency (in Hz)
-              fid["fs"] = st[1].stats.delta
+              fid["fs"] = 1/st[1].stats.delta
               # trace
               fid["trace"] = st[1].data
             end
@@ -173,9 +173,9 @@ function cutpwaves(eqname, stations, intervals, freqbands; paircat=false)
         if sum(idx) > 25
 
           # band pass filter
-          responsetype = Bandpass(freqbands[i][1], freqbands[i][2]; fs)
+          responsetype = Bandpass(freqbands[i][1], freqbands[i][2])
           designmethod = Butterworth(4)
-          filttrace = filtfilt(digitalfilter(responsetype, designmethod), trace)
+          filttrace = filtfilt(digitalfilter(responsetype, designmethod; fs), trace)
 
           # cut
           cutstarttime = starttime + Int(round(10^6*time[idx][1]))
