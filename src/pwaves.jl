@@ -2,10 +2,6 @@
 # - Prevent pairing with neighboring event?
 # - Allow for gaps!
 
-# initialize model for ray prediction
-global taup = pyimport("obspy.taup")
-global model = taup.TauPyModel(model="prem")
-
 """
     downloadpwaves(eqname, stations)
 
@@ -107,6 +103,10 @@ will filter data from the first station to 1 to 3 Hz and that from the second st
 1.5 to 2.5 Hz.
 """
 function cutpwaves(eqname, stations, intervals, freqbands; paircat=false)
+
+  # initialize model for ray prediction
+  taup = pyimport("obspy.taup")
+  model = taup.TauPyModel(model="prem")
 
   if paircat
 
